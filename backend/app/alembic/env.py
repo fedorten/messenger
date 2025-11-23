@@ -63,10 +63,17 @@ def run_migrations_online():
     """
     configuration = config.get_section(config.config_ini_section)
     configuration["sqlalchemy.url"] = get_url()
+    
+    # SQLite не требует пула соединений
+    poolclass = pool.NullPool
+    if get_url().startswith("sqlite"):
+        poolclass = pool.StaticPool
+    
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
+        poolclass=poolclass,
+        connect_args={"check_same_thread": False} if get_url().startswith("sqlite") else {},
     )
 
     with connectable.connect() as connection:
