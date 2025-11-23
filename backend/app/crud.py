@@ -223,6 +223,48 @@ def delete_message(*, session: Session, message_id: int, user_id: int) -> bool:
     return True
 
 
+def add_members_to_group_chat(*, session: Session, chat_id: int, member_ids: list[int], current_user_id: int) -> Chat | None:
+    """Добавить участников в групповой чат"""
+    # Проверяем, что чат существует и является групповым
+    chat = session.get(Chat, chat_id)
+    if not chat or chat.chat_type != "group":
+        return None
+    
+    # Проверяем, что текущий пользователь является участником чата
+    current_member = session.exec(
+        select(ChatMember).where(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id == current_user_id
+        )
+    ).first()
+    
+    if not current_member:
+        return None
+    
+    # Получаем существующих участников
+    existing_members = session.exec(
+        select(ChatMember).where(ChatMember.chat_id == chat_id)
+    ).all()
+    existing_user_ids = {m.user_id for m in existing_members}
+    
+    # Добавляем новых участников
+    added_count = 0
+    for user_id in member_ids:
+        if user_id not in existing_user_ids:
+            # Проверяем, что пользователь существует
+            user = session.get(User, user_id)
+            if user:
+                member = ChatMember(chat_id=chat_id, user_id=user_id)
+                session.add(member)
+                added_count += 1
+    
+    if added_count > 0:
+        session.commit()
+        session.refresh(chat)
+    
+    return chat
+
+
 def mark_chat_as_read(*, session: Session, chat_id: int, user_id: int) -> None:
     """Отметить чат как прочитанный"""
     from datetime import datetime, timezone

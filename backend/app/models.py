@@ -178,6 +178,10 @@ class ChatMemberPublic(SQLModel):
     last_read_at: datetime | None
 
 
+class ChatAddMembers(SQLModel):
+    member_ids: list[int] = Field(min_length=1)
+
+
 class ChatMessageCreate(SQLModel):
     content: str = Field(min_length=1, max_length=4096)
 

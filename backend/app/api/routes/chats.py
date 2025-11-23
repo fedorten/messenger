@@ -7,6 +7,7 @@ from app import crud
 from app.api.deps import CurrentUser, SessionDep
 from app.models import (
     Chat,
+    ChatAddMembers,
     ChatCreate,
     ChatMember,
     ChatMemberPublic,
@@ -155,6 +156,40 @@ def create_group_chat(
     )
     
     return _format_chat_public(chat, current_user.id, session)
+
+
+@router.post("/{chat_id}/members", response_model=ChatPublic)
+def add_members_to_group(
+    chat_id: int,
+    members_in: ChatAddMembers,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Any:
+    """Добавить участников в групповой чат"""
+    chat = crud.get_chat(session=session, chat_id=chat_id, user_id=current_user.id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    if chat.chat_type != "group":
+        raise HTTPException(status_code=400, detail="Can only add members to group chats")
+    
+    # Проверяем, что все пользователи существуют
+    for user_id in members_in.member_ids:
+        user = session.get(User, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+    
+    updated_chat = crud.add_members_to_group_chat(
+        session=session,
+        chat_id=chat_id,
+        member_ids=members_in.member_ids,
+        current_user_id=current_user.id,
+    )
+    
+    if not updated_chat:
+        raise HTTPException(status_code=403, detail="You don't have permission to add members to this chat")
+    
+    return _format_chat_public(updated_chat, current_user.id, session)
 
 
 @router.post("/{chat_id}/read", response_model=Message)

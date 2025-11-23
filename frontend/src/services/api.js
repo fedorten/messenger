@@ -91,6 +91,22 @@ export const chatsAPI = {
     return response.data
   },
   
+  createGroupChat: async (name, memberIds) => {
+    const response = await api.post('/chats/group', {
+      chat_type: 'group',
+      name: name,
+      member_ids: memberIds,
+    })
+    return response.data
+  },
+  
+  addMembersToGroup: async (chatId, memberIds) => {
+    const response = await api.post(`/chats/${chatId}/members`, {
+      member_ids: memberIds,
+    })
+    return response.data
+  },
+  
   getMessages: async (chatId, skip = 0, limit = 50) => {
     const response = await api.get(`/chats/${chatId}/messages`, {
       params: { skip, limit },

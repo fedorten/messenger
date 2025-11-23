@@ -107,94 +107,154 @@ export default {
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background: #f5f5f5;
+  background: linear-gradient(135deg, #0a0a0a 0%, #1a0a2e 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.register-container::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(147, 51, 234, 0.1) 0%, transparent 70%);
+  animation: pulse 20s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 0.5; }
+  50% { transform: scale(1.1); opacity: 0.8; }
 }
 
 .register-card {
-  background: white;
-  padding: 2rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  background: rgba(26, 26, 26, 0.95);
+  backdrop-filter: blur(10px);
+  padding: 3rem;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(147, 51, 234, 0.3), 0 0 0 1px rgba(147, 51, 234, 0.1);
   width: 100%;
-  max-width: 400px;
+  max-width: 420px;
+  position: relative;
+  z-index: 1;
 }
 
 h1 {
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
   text-align: center;
-  color: #333;
+  color: var(--text-primary);
+  font-size: 2rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #9333ea 0%, #a855f7 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .form-group {
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
 }
 
 label {
   display: block;
   margin-bottom: 0.5rem;
-  color: #555;
+  color: var(--text-secondary);
   font-weight: 500;
+  font-size: 0.9rem;
 }
 
 input {
   width: 100%;
-  padding: 0.75rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
   font-size: 1rem;
   box-sizing: border-box;
+  background: rgba(10, 10, 10, 0.5);
+  color: var(--text-primary);
+  transition: all 0.3s ease;
+}
+
+input::placeholder {
+  color: var(--text-muted);
 }
 
 input:focus {
   outline: none;
-  border-color: #4CAF50;
+  border-color: var(--primary-purple);
+  box-shadow: 0 0 0 3px rgba(147, 51, 234, 0.1);
+  background: rgba(10, 10, 10, 0.7);
 }
 
 button {
   width: 100%;
-  padding: 0.75rem;
-  background: #4CAF50;
+  padding: 0.875rem;
+  background: linear-gradient(135deg, var(--primary-purple) 0%, var(--primary-purple-light) 100%);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 8px;
   font-size: 1rem;
+  font-weight: 600;
   cursor: pointer;
   margin-top: 1rem;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(147, 51, 234, 0.4);
 }
 
 button:hover:not(:disabled) {
-  background: #45a049;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(147, 51, 234, 0.5);
+  background: linear-gradient(135deg, var(--primary-purple-light) 0%, var(--primary-purple) 100%);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 button:disabled {
-  background: #ccc;
+  background: var(--bg-card);
   cursor: not-allowed;
+  box-shadow: none;
+  opacity: 0.5;
 }
 
 .error {
-  color: #f44336;
+  color: var(--error);
   margin-top: 0.5rem;
   font-size: 0.9rem;
+  padding: 0.5rem;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
 .success {
-  color: #4CAF50;
+  color: var(--success);
   margin-top: 0.5rem;
   font-size: 0.9rem;
+  padding: 0.5rem;
+  background: rgba(16, 185, 129, 0.1);
+  border-radius: 6px;
+  border: 1px solid rgba(16, 185, 129, 0.2);
 }
 
 .login-link {
   text-align: center;
-  margin-top: 1rem;
-  color: #666;
+  margin-top: 1.5rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
 }
 
 .login-link a {
-  color: #4CAF50;
+  color: var(--primary-purple-light);
   text-decoration: none;
+  font-weight: 500;
+  transition: color 0.3s ease;
 }
 
 .login-link a:hover {
+  color: var(--primary-purple);
   text-decoration: underline;
 }
 </style>

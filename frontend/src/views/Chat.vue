@@ -3,7 +3,16 @@
     <header class="chat-header">
       <button @click="goBack" class="back-btn">← Назад</button>
       <h2>{{ chatName }}</h2>
-      <div></div>
+      <div class="header-actions">
+        <button
+          v-if="isGroupChat"
+          @click="showAddMembers = true"
+          class="add-members-btn"
+          title="Добавить участников"
+        >
+          + Участники
+        </button>
+      </div>
     </header>
 
     <div v-if="loading" class="loading">Загрузка...</div>
@@ -35,6 +44,67 @@
         </button>
       </div>
     </div>
+
+    <!-- Модальное окно добавления участников -->
+    <div v-if="showAddMembers" class="modal-overlay" @click.self="showAddMembers = false">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Добавить участников</h3>
+          <button @click="showAddMembers = false" class="close-btn">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Поиск пользователей:</label>
+            <input
+              v-model="memberSearchQuery"
+              type="text"
+              placeholder="Начните вводить имя или email..."
+              @input="handleMemberSearch"
+            />
+            <div v-if="memberSearchResults.length > 0" class="member-search-results">
+              <div
+                v-for="user in memberSearchResults"
+                :key="user.id"
+                class="member-item"
+                @click="toggleAddMember(user)"
+              >
+                <div class="member-info">
+                  <strong>{{ user.full_name || user.email }}</strong>
+                  <span class="member-email">{{ user.email }}</span>
+                </div>
+                <div class="checkbox" :class="{ checked: isAddMemberSelected(user.id) }">
+                  {{ isAddMemberSelected(user.id) ? '✓' : '' }}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-if="membersToAdd.length > 0" class="selected-members">
+            <div class="selected-label">Выбранные участники ({{ membersToAdd.length }}):</div>
+            <div class="selected-tags">
+              <span
+                v-for="member in membersToAdd"
+                :key="member.id"
+                class="member-tag"
+              >
+                {{ member.full_name || member.email }}
+                <button @click="removeAddMember(member.id)" class="remove-member">×</button>
+              </span>
+            </div>
+          </div>
+          <div v-if="addMemberError" class="error">{{ addMemberError }}</div>
+        </div>
+        <div class="modal-footer">
+          <button @click="showAddMembers = false" class="cancel-btn">Отмена</button>
+          <button
+            @click="addMembersToGroup"
+            :disabled="membersToAdd.length === 0 || addingMembers"
+            class="create-btn"
+          >
+            {{ addingMembers ? 'Добавление...' : 'Добавить' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -58,11 +128,21 @@ export default {
     const messagesContainer = ref(null)
     const ws = ref(null)
     const shouldAutoScroll = ref(true)
+    const isGroupChat = ref(false)
+    const showAddMembers = ref(false)
+    const memberSearchQuery = ref('')
+    const memberSearchResults = ref([])
+    const membersToAdd = ref([])
+    const addingMembers = ref(false)
+    const addMemberError = ref('')
+    const currentChat = ref(null)
 
     const loadChat = async () => {
       try {
         const chat = await chatsAPI.getChat(chatId)
+        currentChat.value = chat
         chatName.value = getChatName(chat)
+        isGroupChat.value = chat.chat_type === 'group'
       } catch (error) {
         console.error('Error loading chat:', error)
       }
@@ -178,7 +258,7 @@ export default {
         
         // Отправляем через WebSocket
         try {
-          ws.value.sendMessage(content)
+        ws.value.sendMessage(content)
         } catch (error) {
           // Если отправка не удалась, удаляем временное сообщение
           const index = messages.value.findIndex(m => m.tempId === tempId)
@@ -265,7 +345,7 @@ export default {
                 }
               }
               // Прокручиваем вниз после обновления сообщений
-              scrollToBottom()
+            scrollToBottom()
             })
           } else {
             console.log('Received WebSocket message with type:', data.type)
@@ -277,6 +357,71 @@ export default {
       )
 
       ws.value.connect()
+    }
+
+    const handleMemberSearch = async () => {
+      if (!memberSearchQuery.value.trim()) {
+        memberSearchResults.value = []
+        return
+      }
+      try {
+        const { usersAPI } = await import('../services/api')
+        const response = await usersAPI.search(memberSearchQuery.value)
+        // Исключаем текущего пользователя и уже существующих участников
+        const existingMemberIds = currentChat.value?.members?.map(m => m.user_id) || []
+        const excludeIds = [currentUserId.value, ...existingMemberIds].filter(Boolean)
+        memberSearchResults.value = (response.data || []).filter(u => !excludeIds.includes(u.id))
+      } catch (error) {
+        console.error('Member search error:', error)
+        memberSearchResults.value = []
+      }
+    }
+
+    const toggleAddMember = (user) => {
+      const index = membersToAdd.value.findIndex(m => m.id === user.id)
+      if (index === -1) {
+        membersToAdd.value.push(user)
+      } else {
+        membersToAdd.value.splice(index, 1)
+      }
+    }
+
+    const isAddMemberSelected = (userId) => {
+      return membersToAdd.value.some(m => m.id === userId)
+    }
+
+    const removeAddMember = (userId) => {
+      const index = membersToAdd.value.findIndex(m => m.id === userId)
+      if (index !== -1) {
+        membersToAdd.value.splice(index, 1)
+      }
+    }
+
+    const addMembersToGroup = async () => {
+      if (membersToAdd.value.length === 0) {
+        addMemberError.value = 'Выберите хотя бы одного участника'
+        return
+      }
+
+      addingMembers.value = true
+      addMemberError.value = ''
+
+      try {
+        const memberIds = membersToAdd.value.map(m => m.id)
+        await chatsAPI.addMembersToGroup(chatId, memberIds)
+        
+        // Сброс формы и обновление чата
+        showAddMembers.value = false
+        memberSearchQuery.value = ''
+        memberSearchResults.value = []
+        membersToAdd.value = []
+        await loadChat()
+      } catch (error) {
+        console.error('Error adding members:', error)
+        addMemberError.value = error.response?.data?.detail || 'Ошибка добавления участников'
+      } finally {
+        addingMembers.value = false
+      }
     }
 
     const goBack = () => {
@@ -314,6 +459,7 @@ export default {
       loading.value = true
       messages.value = []
       shouldAutoScroll.value = true
+      currentChat.value = null
       await loadChat()
       await loadMessages()
       setupWebSocket()
@@ -338,10 +484,22 @@ export default {
       chatName,
       currentUserId,
       messagesContainer,
+      isGroupChat,
+      showAddMembers,
+      memberSearchQuery,
+      memberSearchResults,
+      membersToAdd,
+      addingMembers,
+      addMemberError,
       sendMessage,
       handleTyping,
       getSenderName,
       formatTime,
+      handleMemberSearch,
+      toggleAddMember,
+      isAddMemberSelected,
+      removeAddMember,
+      addMembersToGroup,
       goBack,
     }
   },
@@ -355,34 +513,43 @@ export default {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: white;
+  background: var(--bg-dark);
 }
 
 .chat-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem;
-  border-bottom: 1px solid #eee;
-  background: white;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-card);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
 }
 
 .back-btn {
   padding: 0.5rem 1rem;
-  background: #f5f5f5;
-  border: none;
-  border-radius: 4px;
+  background: rgba(10, 10, 10, 0.5);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
   cursor: pointer;
+  color: var(--text-primary);
+  font-weight: 500;
+  transition: all 0.3s ease;
 }
 
 .back-btn:hover {
-  background: #e0e0e0;
+  background: var(--bg-card-hover);
+  border-color: var(--primary-purple);
+  color: var(--primary-purple-light);
 }
 
 .chat-header h2 {
   margin: 0;
   flex: 1;
   text-align: center;
+  color: var(--text-primary);
+  font-size: 1.25rem;
+  font-weight: 600;
 }
 
 .chat-content {
@@ -390,88 +557,439 @@ export default {
   flex-direction: column;
   flex: 1;
   overflow: hidden;
+  background: var(--bg-dark);
 }
 
 .messages-container {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
-  background: #f9f9f9;
+  padding: 1.5rem;
+  background: var(--bg-dark);
+}
+
+.messages-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.messages-container::-webkit-scrollbar-track {
+  background: var(--bg-card);
+}
+
+.messages-container::-webkit-scrollbar-thumb {
+  background: var(--primary-purple);
+  border-radius: 4px;
+}
+
+.messages-container::-webkit-scrollbar-thumb:hover {
+  background: var(--primary-purple-light);
 }
 
 .message {
   margin-bottom: 1rem;
-  padding: 0.75rem;
-  background: white;
-  border-radius: 8px;
+  padding: 0.875rem 1rem;
+  background: var(--bg-card);
+  border-radius: 12px;
   max-width: 70%;
+  border: 1px solid var(--border-color);
+  transition: all 0.3s ease;
+}
+
+.message:hover {
+  border-color: var(--primary-purple);
 }
 
 .own-message {
   margin-left: auto;
-  background: #4CAF50;
+  background: linear-gradient(135deg, var(--primary-purple) 0%, var(--primary-purple-light) 100%);
   color: white;
+  border: none;
+  box-shadow: 0 4px 15px rgba(147, 51, 234, 0.3);
 }
 
 .message-header {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.5rem;
   font-size: 0.85rem;
+}
+
+.message-header strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.own-message .message-header strong {
+  color: rgba(255, 255, 255, 0.95);
 }
 
 .message-time {
   opacity: 0.7;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.own-message .message-time {
+  color: rgba(255, 255, 255, 0.8);
 }
 
 .message-content {
   word-wrap: break-word;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.own-message .message-content {
+  color: white;
 }
 
 .input-container {
   display: flex;
-  padding: 1rem;
-  border-top: 1px solid #eee;
-  background: white;
-  gap: 0.5rem;
+  padding: 1.5rem;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-card);
+  gap: 0.75rem;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.2);
 }
 
 .input-container input {
   flex: 1;
-  padding: 0.75rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
   font-size: 1rem;
+  background: rgba(10, 10, 10, 0.5);
+  color: var(--text-primary);
+  transition: all 0.3s ease;
+}
+
+.input-container input::placeholder {
+  color: var(--text-muted);
 }
 
 .input-container input:focus {
   outline: none;
-  border-color: #4CAF50;
+  border-color: var(--primary-purple);
+  box-shadow: 0 0 0 3px rgba(147, 51, 234, 0.1);
+  background: rgba(10, 10, 10, 0.7);
 }
 
 .input-container button {
-  padding: 0.75rem 1.5rem;
-  background: #4CAF50;
+  padding: 0.875rem 1.5rem;
+  background: linear-gradient(135deg, var(--primary-purple) 0%, var(--primary-purple-light) 100%);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 1rem;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(147, 51, 234, 0.4);
 }
 
 .input-container button:hover:not(:disabled) {
-  background: #45a049;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(147, 51, 234, 0.5);
 }
 
 .input-container button:disabled {
-  background: #ccc;
+  background: var(--bg-card-hover);
   cursor: not-allowed;
+  box-shadow: none;
+  opacity: 0.5;
 }
 
 .loading {
   text-align: center;
   padding: 2rem;
-  color: #666;
+  color: var(--text-secondary);
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.add-members-btn {
+  padding: 0.5rem 1rem;
+  background: rgba(147, 51, 234, 0.2);
+  border: 1px solid var(--primary-purple);
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--primary-purple-light);
+  font-weight: 500;
+  font-size: 0.875rem;
+  transition: all 0.3s ease;
+}
+
+.add-members-btn:hover {
+  background: rgba(147, 51, 234, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(147, 51, 234, 0.3);
+}
+
+/* Модальное окно (аналогично Home.vue) */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(4px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modal-content {
+  background: var(--bg-card);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(147, 51, 234, 0.3);
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 2rem;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.3s ease;
+}
+
+.close-btn:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.modal-body {
+  padding: 1.5rem;
+  flex: 1;
+}
+
+.modal-body .form-group {
+  margin-bottom: 1.5rem;
+}
+
+.modal-body label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.modal-body input {
+  width: 100%;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 1rem;
+  box-sizing: border-box;
+  background: rgba(10, 10, 10, 0.5);
+  color: var(--text-primary);
+  transition: all 0.3s ease;
+}
+
+.modal-body input:focus {
+  outline: none;
+  border-color: var(--primary-purple);
+  box-shadow: 0 0 0 3px rgba(147, 51, 234, 0.1);
+}
+
+.member-search-results {
+  margin-top: 0.5rem;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(10, 10, 10, 0.5);
+}
+
+.member-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: background 0.3s ease;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.member-item:last-child {
+  border-bottom: none;
+}
+
+.member-item:hover {
+  background: var(--bg-card-hover);
+}
+
+.member-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.member-info strong {
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.member-email {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.checkbox {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border-color);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  font-weight: 700;
+  transition: all 0.3s ease;
+}
+
+.checkbox.checked {
+  background: var(--primary-purple);
+  border-color: var(--primary-purple);
+}
+
+.selected-members {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.selected-label {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+}
+
+.selected-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.member-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(147, 51, 234, 0.2);
+  color: var(--primary-purple-light);
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+.remove-member {
+  background: none;
+  border: none;
+  color: var(--primary-purple-light);
+  cursor: pointer;
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: all 0.3s ease;
+}
+
+.remove-member:hover {
+  background: rgba(147, 51, 234, 0.3);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 1.5rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.cancel-btn,
+.create-btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.cancel-btn {
+  background: var(--bg-card-hover);
+  color: var(--text-secondary);
+}
+
+.cancel-btn:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.create-btn {
+  background: linear-gradient(135deg, var(--primary-purple) 0%, var(--primary-purple-light) 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(147, 51, 234, 0.4);
+}
+
+.create-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(147, 51, 234, 0.5);
+}
+
+.create-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.error {
+  color: var(--error);
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  padding: 0.5rem;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.2);
 }
 </style>
 
