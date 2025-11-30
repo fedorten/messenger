@@ -62,7 +62,7 @@ dev:
 		$(MAKE) setup-backend; \
 	fi
 	@trap 'kill 0' EXIT; \
-	cd backend && source .venv/bin/activate && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 & \
+	cd backend && . .venv/bin/activate && python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 & \
 	cd frontend && npm run dev & \
 	wait
 
