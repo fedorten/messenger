@@ -1,7 +1,7 @@
 <template>
   <div class="home-container">
     <header class="header">
-      <h1>Мессенджер</h1>
+      <h1>Fusion</h1>
       <div class="header-actions">
         <router-link to="/profile" class="profile-link">Профиль</router-link>
         <button @click="handleLogout" class="logout-btn">Выйти</button>
