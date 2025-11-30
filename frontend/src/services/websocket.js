@@ -11,19 +11,11 @@ export class ChatWebSocket {
   }
 
   connect() {
-    // Определяем URL для WebSocket
-    // В режиме разработки используем прямой URL к бэкенду
-    // В продакшене используем относительный путь через прокси
+    // Всегда используем относительный путь через nginx прокси
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    let wsUrl
-    if (import.meta.env.DEV) {
-      // В режиме разработки подключаемся напрямую к бэкенду
-      const host = 'localhost:8000'
-      wsUrl = `${protocol}//${host}/api/v1/ws/${this.chatId}?token=${this.token}`
-    } else {
-      // В продакшене используем относительный путь (nginx проксирует)
-      wsUrl = `${protocol}//${window.location.host}/api/v1/ws/${this.chatId}?token=${this.token}`
-    }
+    const wsUrl = `${protocol}//${window.location.host}/api/v1/ws/${this.chatId}?token=${this.token}`
+    
+    console.log('Connecting to WebSocket:', wsUrl)
     
     try {
       this.ws = new WebSocket(wsUrl)
@@ -97,4 +89,3 @@ export class ChatWebSocket {
     }
   }
 }
-

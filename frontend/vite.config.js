@@ -5,30 +5,19 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   plugins: [vue()],
   server: {
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-        secure: false,
-        timeout: 10000,
-        configure: (proxy, _options) => {
-          proxy.on('error', (err, req, res) => {
-            console.error('Proxy error:', err.message);
-            console.error('Request URL:', req.url);
-            if (!res.headersSent) {
-              res.writeHead(500, {
-                'Content-Type': 'text/plain',
-              });
-              res.end('Proxy error: Backend server may not be running on http://localhost:8000');
-            }
-          });
-        },
-      },
-      '/ws': {
-        target: 'ws://localhost:8000',
-        ws: true,
-        changeOrigin: true,
-      }
-    }
-  }
+    host: '0.0.0.0',
+    port: 5173,
+    allowedHosts: [
+      'paerser2.ru',
+      'www.paerser2.ru',
+      'localhost',
+      '127.0.0.1'
+    ]
+    // Убираем proxy - теперь этим занимается nginx
+  },
+  resolve: {
+    alias: {
+      '@': '/src',
+    },
+  },
 })
