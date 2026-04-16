@@ -127,6 +127,45 @@ def create_group_chat(
     return new_chat
 
 
+def create_channel(
+    *, session: Session, creator_id: int, name: str, description: str | None = None
+) -> Chat:
+    """Создать канал (только админ может создавать и постить)"""
+    new_chat = Chat(chat_type="channel", name=name)
+    session.add(new_chat)
+    session.flush()
+
+    # Создатель становится админом канала
+    member = ChatMember(chat_id=new_chat.id, user_id=creator_id, role="admin")
+    session.add(member)
+
+    session.commit()
+    session.refresh(new_chat)
+    return new_chat
+
+
+def update_user_online_status(
+    *, session: Session, user_id: int, is_online: bool
+) -> None:
+    """Обновить статус онлайн пользователя"""
+    from datetime import datetime, timezone
+    
+    user = session.get(User, user_id)
+    if user:
+        user.is_online = is_online
+        user.last_seen_at = datetime.now(timezone.utc) if not is_online else user.last_seen_at
+        session.add(user)
+        session.commit()
+
+
+def get_user_online_status(*, session: Session, user_id: int) -> dict:
+    """Получить статус онлайн пользователя"""
+    user = session.get(User, user_id)
+    if user:
+        return {"is_online": user.is_online, "last_seen_at": user.last_seen_at}
+    return {"is_online": False, "last_seen_at": None}
+
+
 def get_user_chats(*, session: Session, user_id: int) -> list[Chat]:
     """Получить все чаты пользователя"""
     statement = (

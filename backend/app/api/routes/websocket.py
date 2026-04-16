@@ -7,7 +7,7 @@ from sqlmodel import Session
 from app import crud
 from app.core.security import decode_access_token
 from app.core.db import engine
-from app.models import ChatMessage, ChatMessagePublic, User, UserPublic
+from app.models import ChatMember, ChatMessage, ChatMessagePublic, User, UserPublic
 
 router = APIRouter()
 
@@ -115,6 +115,21 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
         if not chat:
             await websocket.close(code=1008, reason="Chat not found or access denied")
             return
+        
+        # Проверка для каналов - только админ может постить
+        if chat.chat_type == "channel":
+            member = session.exec(
+                select(ChatMember).where(
+                    ChatMember.chat_id == chat_id, ChatMember.user_id == user.id
+                )
+            ).first()
+            if not member or member.role != "admin":
+                await websocket.close(code=1008, reason="Only admins can post in channels")
+                return
+
+    # Отмечаем пользователя как онлайн
+    with Session(engine) as session:
+        crud.update_user_online_status(session=session, user_id=user.id, is_online=True)
 
     await manager.connect(websocket, chat_id, user.id)
 
@@ -147,6 +162,9 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
                                 avatar_url=sender.avatar_url,
                                 is_active=sender.is_active,
                                 is_superuser=sender.is_superuser,
+                                is_online=sender.is_online,
+                                last_seen_at=sender.last_seen_at,
+                                timezone=sender.timezone,
                             )
                         else:
                             sender_public = None
@@ -163,6 +181,7 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
                             media_size=message.media_size,
                             created_at=message.created_at,
                             edited_at=message.edited_at,
+                            is_read=False,
                         )
 
                         # Отправляем сообщение всем участникам чата
@@ -194,4 +213,7 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
                 )
 
     except WebSocketDisconnect:
+        # Отмечаем пользователя как офлайн
+        with Session(engine) as session:
+            crud.update_user_online_status(session=session, user_id=user.id, is_online=False)
         manager.disconnect(websocket, chat_id, user.id)

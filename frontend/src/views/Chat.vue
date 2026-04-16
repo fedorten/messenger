@@ -14,10 +14,11 @@
           maxlength="50"
           autofocus
         />
+        <span v-if="isChannel" class="channel-type-badge">Канал</span>
       </div>
       <div class="header-actions">
         <button
-          v-if="isGroupChat"
+          v-if="isGroupChat || isChannel"
           @click="showGroupMembers = true"
           class="members-btn"
           title="Участники"
@@ -33,7 +34,7 @@
           +
         </button>
         <button
-          v-if="isGroupChat && isAdmin"
+          v-if="(isGroupChat && isAdmin) || (isChannel && isAdmin)"
           @click="isEditingName = true"
           class="settings-btn"
           title="Настройки"
@@ -51,16 +52,28 @@
           :key="message.id"
           :class="['message', { 'own-message': message.sender_id === currentUserId }]"
         >
-          <img 
-            v-if="message.sender?.avatar_url" 
-            :src="message.sender.avatar_url" 
-            class="message-avatar" 
-          />
+          <div class="avatar-wrapper">
+            <img 
+              v-if="message.sender?.avatar_url" 
+              :src="message.sender.avatar_url" 
+              class="message-avatar" 
+            />
+            <div v-else class="message-avatar-placeholder">
+              {{ getSenderInitials(message) }}
+            </div>
+            <span 
+              v-if="message.sender?.is_online" 
+              class="online-indicator-small"
+            ></span>
+          </div>
           <div class="message-body">
             <div class="message-header">
               <strong>{{ getSenderName(message) }}</strong>
               <div class="message-actions">
                 <span class="message-time">{{ formatTime(message.created_at) }}</span>
+                <span v-if="message.sender_id === currentUserId" class="read-status">
+                  {{ message.is_read ? '✓✓' : '✓' }}
+                </span>
                 <button 
                   v-if="message.sender_id === currentUserId"
                   @click.stop="deleteMessage(message)"
@@ -98,7 +111,7 @@
       </div>
 
       <div class="input-container">
-        <label class="attach-btn">
+        <label v-if="canSendMessage" class="attach-btn">
           <input
             type="file"
             ref="fileInput"
@@ -111,13 +124,17 @@
           </svg>
         </label>
         <input
+          v-if="canSendMessage"
           v-model="newMessage"
           type="text"
           placeholder="Введите сообщение..."
           @keyup.enter="sendMessage"
           @input="handleTyping"
         />
-        <button @click="sendMessage" :disabled="!newMessage.trim() && !selectedFile">
+        <div v-else class="no-permission-message">
+          Только администраторы могут публиковать сообщения
+        </div>
+        <button v-if="canSendMessage" @click="sendMessage" :disabled="!newMessage.trim() && !selectedFile">
           Отправить
         </button>
       </div>
@@ -234,7 +251,7 @@
 </template>
 
 <script>
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { chatsAPI, messagesAPI, authAPI } from '../services/api'
 import { ChatWebSocket } from '../services/websocket'
@@ -254,6 +271,7 @@ export default {
     const ws = ref(null)
     const shouldAutoScroll = ref(true)
     const isGroupChat = ref(false)
+    const isChannel = ref(false)
     const isAdmin = ref(false)
     const isEditingName = ref(false)
     const editedName = ref('')
@@ -275,8 +293,9 @@ export default {
         currentChat.value = chat
         chatName.value = getChatName(chat)
         isGroupChat.value = chat.chat_type === 'group'
+        isChannel.value = chat.chat_type === 'channel'
         
-        if (isGroupChat.value) {
+        if (isGroupChat.value || isChannel.value) {
           const myMember = chat.members?.find(m => m.user_id === currentUserId.value)
           isAdmin.value = myMember?.role === 'admin'
         }
@@ -325,10 +344,41 @@ export default {
       return message.sender?.full_name || message.sender?.email || 'Пользователь'
     }
 
-    const formatTime = (dateString) => {
+    const getSenderInitials = (message) => {
+      const name = message.sender?.full_name || message.sender?.email || 'Пользователь'
+      return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+    }
+
+    const formatTime = (dateString, userTimezone = null) => {
       const date = new Date(dateString)
+      
+      // Используем часовой пояс пользователя если указан
+      if (userTimezone) {
+        try {
+          const formatter = new Intl.DateTimeFormat('ru-RU', {
+            timeZone: userTimezone,
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+          return formatter.format(date)
+        } catch (e) {
+          // Если часовой пояс невалидный, используем локальное время
+        }
+      }
+      
       return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
     }
+
+    const canSendMessage = computed(() => {
+      if (!currentChat.value) return false
+      // Приватный чат - все могут отправлять
+      if (currentChat.value.chat_type === 'private') return true
+      // Группа - все участники могут отправлять
+      if (currentChat.value.chat_type === 'group') return true
+      // Канал - только админ может отправлять
+      if (currentChat.value.chat_type === 'channel') return isAdmin.value
+      return false
+    })
 
     const scrollToBottom = async (force = false) => {
       if (!force && !shouldAutoScroll.value) return
@@ -749,6 +799,7 @@ export default {
       currentUserId,
       messagesContainer,
       isGroupChat,
+      isChannel,
       isAdmin,
       isEditingName,
       editedName,
@@ -763,9 +814,11 @@ export default {
       uploading,
       fileInput,
       currentChat,
+      canSendMessage,
       sendMessage,
       handleTyping,
       getSenderName,
+      getSenderInitials,
       formatTime,
       handleFileSelect,
       clearFile,
@@ -1573,6 +1626,64 @@ export default {
 .settings-btn:hover {
   background: var(--bg-card-hover);
   border-color: var(--primary-purple);
+}
+
+.channel-type-badge {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--success);
+  margin-top: 2px;
+}
+
+.avatar-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.message-avatar-placeholder {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary-purple) 0%, var(--primary-purple-light) 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+.online-indicator-small {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  background: var(--success);
+  border: 2px solid var(--bg-card);
+  border-radius: 50%;
+}
+
+.read-status {
+  font-size: 0.75rem;
+  color: var(--primary-purple-light);
+  margin-right: 0.5rem;
+}
+
+.own-message .read-status {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.no-permission-message {
+  flex: 1;
+  padding: 0.875rem 1rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  text-align: center;
+  background: rgba(10, 10, 10, 0.3);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
 }
 </style>
 

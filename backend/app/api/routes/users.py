@@ -123,6 +123,19 @@ def update_user_me(
     return current_user
 
 
+@router.patch("/me/timezone", response_model=UserPublic)
+def update_timezone(
+    *, session: SessionDep, body: dict, current_user: CurrentUser
+) -> Any:
+    """Обновить часовой пояс пользователя"""
+    timezone = body.get("timezone", "UTC")
+    current_user.timezone = timezone
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+    return current_user
+
+
 @router.patch("/me/password", response_model=Message)
 def update_password_me(
     *, session: SessionDep, body: UpdatePassword, current_user: CurrentUser
@@ -143,6 +156,33 @@ def update_password_me(
     return Message(message="Password updated successfully")
 
 
+ALLOWED_IMAGE_SIGNATURES = {
+    b"\xff\xd8\xff": "jpeg",
+    b"\x89PNG\r\n\x1a\n": "png",
+    b"GIF87a": "gif",
+    b"GIF89a": "gif",
+    b"RIFF": "webp",
+    b"BM": "bmp",
+}
+
+VALID_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp", "bmp"}
+
+
+def validate_image_content(content: bytes) -> str | None:
+    for magic, ext in ALLOWED_IMAGE_SIGNATURES.items():
+        if content.startswith(magic):
+            return ext
+    return None
+
+
+def get_directory_size(path: Path) -> int:
+    total = 0
+    for entry in path.rglob("*"):
+        if entry.is_file():
+            total += entry.stat().st_size
+    return total
+
+
 @router.post("/me/avatar", response_model=UserPublic)
 async def upload_avatar(
     session: SessionDep,
@@ -155,27 +195,27 @@ async def upload_avatar(
 
     logger.info("upload_avatar called")
 
-    # Проверяем тип файла
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Only images allowed")
-
-    # Проверяем размер (макс 2 МБ)
     content = await file.read()
     if len(content) > 2 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 2MB)")
 
-    # Получаем путь к медиа директории
+    image_ext = validate_image_content(content)
+    if not image_ext:
+        raise HTTPException(status_code=400, detail="Only images allowed")
+    
     base_path = Path(__file__).parent.parent.parent
     avatar_dir = base_path / settings.MEDIA_UPLOAD_DIR / "avatars"
     avatar_dir.mkdir(parents=True, exist_ok=True)
+    
+    current_size = get_directory_size(avatar_dir)
+    if current_size + len(content) > settings.MEDIA_STORAGE_LIMIT:
+        raise HTTPException(status_code=400, detail="Storage limit exceeded")
+
     logger.info(f"Saving avatar to: {avatar_dir}")
 
-    # Генерируем имя файла
-    ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
-    filename = f"user_{current_user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
+    filename = f"user_{current_user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{image_ext}"
     filepath = avatar_dir / filename
 
-    # Сохраняем файл
     with open(filepath, "wb") as f:
         f.write(content)
     logger.info(f"Saved avatar: {filepath}")

@@ -55,6 +55,28 @@
               </div>
             </div>
           </div>
+          <div class="info-item">
+            <label>Часовой пояс:</label>
+            <div class="edit-field">
+              <span v-if="!editingTimezone">{{ user.timezone || 'UTC' }}</span>
+              <select v-else v-model="editedTimezone" class="timezone-select">
+                <option value="UTC">UTC</option>
+                <option value="Europe/Moscow">Москва (UTC+3)</option>
+                <option value="Europe/Kiev">Киев (UTC+2)</option>
+                <option value="Europe/Minsk">Минск (UTC+3)</option>
+                <option value="Europe/London">Лондон (UTC+0)</option>
+                <option value="Europe/Paris">Париж (UTC+1)</option>
+                <option value="America/New_York">Нью-Йорк (UTC-5)</option>
+                <option value="America/Los_Angeles">Лос-Анджелес (UTC-8)</option>
+                <option value="Asia/Tokyo">Токио (UTC+9)</option>
+              </select>
+              <button v-if="!editingTimezone" @click="startEditTimezone" class="edit-btn">✏️</button>
+              <div v-else class="edit-actions">
+                <button @click="saveTimezone" class="save-btn">✓</button>
+                <button @click="cancelEditTimezone" class="cancel-btn">✕</button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="balance-section">
@@ -206,7 +228,10 @@ export default {
     const avatarInput = ref(null)
     const editingName = ref(false)
     const editedName = ref('')
+    const editingTimezone = ref(false)
+    const editedTimezone = ref('UTC')
     const savingName = ref(false)
+    const savingTimezone = ref(false)
     const showTransferModal = ref(false)
     const transferEmail = ref('')
     const transferAmount = ref(0)
@@ -403,6 +428,35 @@ export default {
       editedName.value = ''
     }
 
+    const startEditTimezone = () => {
+      editingTimezone.value = true
+      editedTimezone.value = user.value.timezone || 'UTC'
+    }
+
+    const cancelEditTimezone = () => {
+      editingTimezone.value = false
+      editedTimezone.value = 'UTC'
+    }
+
+    const saveTimezone = async () => {
+      savingTimezone.value = true
+      try {
+        const response = await axios.patch(`${API_BASE_URL}/users/me/timezone`, {
+          timezone: editedTimezone.value
+        }, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
+        })
+        user.value = response.data
+        editingTimezone.value = false
+        alert('Часовой пояс сохранен!')
+      } catch (error) {
+        console.error('Error saving timezone:', error)
+        alert('Ошибка сохранения')
+      } finally {
+        savingTimezone.value = false
+      }
+    }
+
     const saveName = async () => {
       if (editedName.value === (user.value.full_name || '')) {
         cancelEditName()
@@ -482,6 +536,11 @@ export default {
       startEditName,
       cancelEditName,
       saveName,
+      editingTimezone,
+      editedTimezone,
+      startEditTimezone,
+      cancelEditTimezone,
+      saveTimezone,
       handleDelete,
       goBack,
       loadUserNFTs,
@@ -824,6 +883,21 @@ export default {
   border-radius: 6px;
   background: rgba(10, 10, 10, 0.5);
   color: var(--text-primary);
+}
+
+.timezone-select {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid var(--primary-purple);
+  border-radius: 6px;
+  background: rgba(10, 10, 10, 0.5);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.timezone-select:focus {
+  outline: none;
+  border-color: var(--primary-purple-light);
 }
 
 .edit-btn, .save-btn, .cancel-btn {

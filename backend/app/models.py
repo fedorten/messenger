@@ -47,9 +47,14 @@ class User(UserBase, table=True):
     )
     hashed_password: str
     avatar_url: str | None = Field(default=None, max_length=500)
-    balance: int = Field(default=100)  # Шекели
+    balance: int = Field(default=100)
     is_banned: bool = Field(default=False)
     ban_reason: str | None = Field(default=None, max_length=500)
+    is_online: bool = Field(default=False)
+    last_seen_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime, nullable=True)
+    )
+    timezone: str = Field(default="UTC", max_length=50)
     chat_members: list["ChatMember"] = Relationship(
         back_populates="user", cascade_delete=True
     )
@@ -69,6 +74,9 @@ class UserPublic(UserBase):
     is_banned: bool = False
     ban_reason: str | None = None
     is_superuser: bool = False
+    is_online: bool = False
+    last_seen_at: datetime | None = None
+    timezone: str = "UTC"
 
 
 class UserAdminPublic(UserBase):
@@ -118,7 +126,7 @@ class Chat(SQLModel, table=True):
     id: int | None = Field(
         default=None, sa_column=Column(Integer, primary_key=True, autoincrement=True)
     )
-    chat_type: str = Field(default="private", max_length=20)  # "private" или "group"
+    chat_type: str = Field(default="private", max_length=20)
     name: str | None = Field(
         default=None, max_length=255
     )  # Название для групповых чатов
@@ -205,6 +213,7 @@ class ChatPublic(SQLModel):
     updated_at: datetime
     members: list["ChatMemberPublic"] = Field(default_factory=list)
     last_message: "ChatMessagePublic | None" = None
+    unread_count: int = 0
 
 
 class ChatMemberPublic(SQLModel):
@@ -248,6 +257,7 @@ class ChatMessagePublic(SQLModel):
     media_size: int | None = None
     created_at: datetime
     edited_at: datetime | None = None
+    is_read: bool = False
 
 
 class ChatMessageUpdate(SQLModel):

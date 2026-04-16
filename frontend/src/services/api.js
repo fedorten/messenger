@@ -76,6 +76,13 @@ export const authAPI = {
     return response.data
   },
   
+  updateTimezone: async (timezone) => {
+    const response = await axios.patch(`${API_BASE_URL}/users/me/timezone`, { timezone }, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
+    })
+    return response.data
+  },
+  
   transferShekels: async (recipientId, amount) => {
     const response = await axios.post(`${API_BASE_URL}/users/me/transfer`, {
       recipient_id: recipientId,
@@ -147,6 +154,14 @@ export const chatsAPI = {
       chat_type: 'group',
       name: name,
       member_ids: memberIds,
+    })
+    return response.data
+  },
+  
+  createChannel: async (name) => {
+    const response = await api.post('/chats/group', {
+      chat_type: 'channel',
+      name: name,
     })
     return response.data
   },

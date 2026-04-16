@@ -13,9 +13,14 @@
       <div class="search-section">
         <div class="section-header">
           <h2>Поиск пользователей</h2>
-          <button @click="showCreateGroup = true" class="create-group-btn" title="Создать групповой чат">
-            <span>+</span> Группа
-          </button>
+          <div class="header-btns">
+            <button @click="showCreateChannel = true" class="create-channel-btn" title="Создать канал">
+              <span>#</span> Канал
+            </button>
+            <button @click="showCreateGroup = true" class="create-group-btn" title="Создать групповой чат">
+              <span>+</span> Группа
+            </button>
+          </div>
         </div>
         <div class="search-box">
           <input
@@ -52,33 +57,43 @@
           У вас пока нет чатов. Найдите пользователя и начните переписку!
         </div>
         <div v-else class="chats-list">
-          <div
-            v-for="chat in chats"
-            :key="chat.id"
-            class="chat-item"
-            :class="{ 'group-chat': chat.chat_type === 'group' }"
+          <div class="chat-item"
+            :class="{ 'group-chat': chat.chat_type === 'group', 'channel-chat': chat.chat_type === 'channel' }"
             @click="openChat(chat.id)"
           >
-            <img 
-              v-if="getChatAvatar(chat)" 
-              :src="getChatAvatar(chat)" 
-              class="chat-avatar" 
-            />
-            <div v-else class="chat-avatar-placeholder">
-              {{ getChatInitials(chat) }}
+            <div class="avatar-wrapper">
+              <img 
+                v-if="getChatAvatar(chat)" 
+                :src="getChatAvatar(chat)" 
+                class="chat-avatar" 
+              />
+              <div v-else class="chat-avatar-placeholder">
+                {{ getChatInitials(chat) }}
+              </div>
+              <span 
+                v-if="chat.chat_type === 'private' && getOtherMemberOnlineStatus(chat)" 
+                class="online-indicator"
+              ></span>
             </div>
             <div class="chat-info">
               <div class="chat-name-row">
                 <strong>{{ getChatName(chat) }}</strong>
                 <span v-if="chat.chat_type === 'group'" class="group-badge">Группа</span>
+                <span v-if="chat.chat_type === 'channel'" class="channel-badge">Канал</span>
               </div>
               <span v-if="chat.last_message" class="last-message">
+                <span v-if="!chat.last_message.is_read && chat.chat_type !== 'channel'" class="unread-dot"></span>
                 {{ chat.last_message.content }}
               </span>
             </div>
-            <span v-if="chat.last_message" class="chat-time">
-              {{ formatTime(chat.last_message.created_at) }}
-            </span>
+            <div class="chat-right">
+              <span v-if="chat.last_message" class="chat-time">
+                {{ formatTime(chat.last_message.created_at) }}
+              </span>
+              <span v-if="chat.unread_count > 0 && chat.chat_type !== 'channel'" class="unread-badge">
+                {{ chat.unread_count > 99 ? '99+' : chat.unread_count }}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -153,6 +168,38 @@
         </div>
       </div>
     </div>
+
+    <!-- Модальное окно создания канала -->
+    <div v-if="showCreateChannel" class="modal-overlay" @click.self="showCreateChannel = false">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Создать канал</h3>
+          <button @click="showCreateChannel = false" class="close-btn">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Название канала:</label>
+            <input
+              v-model="newChannelName"
+              type="text"
+              placeholder="Введите название канала"
+              maxlength="50"
+            />
+          </div>
+          <div v-if="channelError" class="error">{{ channelError }}</div>
+        </div>
+        <div class="modal-footer">
+          <button @click="showCreateChannel = false" class="cancel-btn">Отмена</button>
+          <button
+            @click="createChannel"
+            :disabled="!newChannelName.trim() || creatingChannel"
+            class="create-btn"
+          >
+            {{ creatingChannel ? 'Создание...' : 'Создать' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -178,6 +225,10 @@ export default {
     const selectedMembers = ref([])
     const creatingGroup = ref(false)
     const groupError = ref('')
+    const showCreateChannel = ref(false)
+    const newChannelName = ref('')
+    const creatingChannel = ref(false)
+    const channelError = ref('')
 
     const handleSearch = async () => {
       if (!searchQuery.value.trim()) {
@@ -235,12 +286,34 @@ export default {
 
     const getChatInitials = (chat) => {
       const name = getChatName(chat)
-      if (!name || name === 'Чат') return '?'
+      if (!name || name === 'Чат') return chat.chat_type === 'channel' ? '#' : '?'
+      if (chat.chat_type === 'channel') return '#'
       return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     }
 
-    const formatTime = (dateString) => {
+    const getOtherMemberOnlineStatus = (chat) => {
+      if (chat.chat_type !== 'private' || !chat.members) return false
+      const otherMember = chat.members.find(m => m.user_id !== (currentUser.value ? currentUser.value.id : null))
+      return otherMember?.user?.is_online || false
+    }
+
+    const formatTime = (dateString, userTimezone = null) => {
       const date = new Date(dateString)
+      
+      // Используем часовой пояс пользователя если указан
+      if (userTimezone) {
+        try {
+          const formatter = new Intl.DateTimeFormat('ru-RU', {
+            timeZone: userTimezone,
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+          return formatter.format(date)
+        } catch (e) {
+          // Если часовой пояс невалидный, используем локальное время
+        }
+      }
+      
       const now = new Date()
       const diff = now - date
       const minutes = Math.floor(diff / 60000)
@@ -336,6 +409,33 @@ export default {
       }
     }
 
+    const createChannel = async () => {
+      if (!newChannelName.value.trim()) {
+        channelError.value = 'Введите название канала'
+        return
+      }
+
+      creatingChannel.value = true
+      channelError.value = ''
+
+      try {
+        const chat = await chatsAPI.createChannel(newChannelName.value)
+        
+        // Сброс формы
+        showCreateChannel.value = false
+        newChannelName.value = ''
+        
+        // Обновляем список чатов и переходим в новый канал
+        await loadChats()
+        router.push(`/chat/${chat.id}`)
+      } catch (error) {
+        console.error('Error creating channel:', error)
+        channelError.value = error.response?.data?.detail || 'Ошибка создания канала'
+      } finally {
+        creatingChannel.value = false
+      }
+    }
+
     const handleLogout = () => {
       localStorage.removeItem('access_token')
       router.push('/login')
@@ -365,18 +465,24 @@ export default {
       selectedMembers,
       creatingGroup,
       groupError,
+      showCreateChannel,
+      newChannelName,
+      creatingChannel,
+      channelError,
       handleSearch,
       startChat,
       openChat,
       getChatName,
       getChatAvatar,
       getChatInitials,
+      getOtherMemberOnlineStatus,
       formatTime,
       handleGroupMemberSearch,
       toggleGroupMember,
       isMemberSelected,
       removeMember,
       createGroupChat,
+      createChannel,
       handleLogout,
     }
   },
@@ -643,6 +749,92 @@ h2 {
 
 .chat-item.group-chat {
   border-left: 3px solid var(--primary-purple);
+}
+
+.chat-item.channel-chat {
+  border-left: 3px solid var(--success);
+}
+
+.avatar-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.online-indicator {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  background: var(--success);
+  border: 2px solid var(--bg-card);
+  border-radius: 50%;
+}
+
+.unread-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--primary-purple);
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.chat-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.unread-badge {
+  background: var(--primary-purple);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.header-btns {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.create-channel-btn {
+  padding: 0.5rem 1rem;
+  background: rgba(34, 197, 94, 0.2);
+  color: var(--success);
+  border: 1px solid var(--success);
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: all 0.3s ease;
+}
+
+.create-channel-btn:hover {
+  background: rgba(34, 197, 94, 0.3);
+  transform: translateY(-2px);
+}
+
+.create-channel-btn span {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.channel-badge {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  background: rgba(34, 197, 94, 0.2);
+  color: var(--success);
+  border-radius: 4px;
+  font-weight: 500;
 }
 
 .chat-info {

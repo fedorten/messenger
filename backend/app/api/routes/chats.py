@@ -68,14 +68,18 @@ def _format_chat_public(
                         avatar_url=user.avatar_url,
                         is_active=user.is_active,
                         is_superuser=user.is_superuser,
+                        is_online=user.is_online,
+                        last_seen_at=user.last_seen_at,
+                        timezone=user.timezone,
                     ),
                     joined_at=member.joined_at,
                     last_read_at=member.last_read_at,
                 )
             )
 
-    # Получаем sender для last_message
+    # Получаем sender для last_message и проверяем прочитано ли
     last_message_sender = None
+    last_message_is_read = False
     if last_message:
         sender_user = session.get(User, last_message.sender_id)
         if sender_user:
@@ -86,7 +90,43 @@ def _format_chat_public(
                 avatar_url=sender_user.avatar_url,
                 is_active=sender_user.is_active,
                 is_superuser=sender_user.is_superuser,
+                is_online=sender_user.is_online,
+                last_seen_at=sender_user.last_seen_at,
+                timezone=sender_user.timezone,
             )
+        # Проверяем, прочитано ли сообщение
+        current_member = session.exec(
+            select(ChatMember).where(
+                ChatMember.chat_id == chat.id, ChatMember.user_id == current_user_id
+            )
+        ).first()
+        if current_member and current_member.last_read_at:
+            last_message_is_read = last_message.created_at <= current_member.last_read_at
+
+    # Подсчитываем непрочитанные сообщения
+    unread_count = 0
+    if chat.chat_type != "channel":
+        current_member = session.exec(
+            select(ChatMember).where(
+                ChatMember.chat_id == chat.id, ChatMember.user_id == current_user_id
+            )
+        ).first()
+        if current_member and current_member.last_read_at:
+            unread_stmt = (
+                select(ChatMessage)
+                .where(ChatMessage.chat_id == chat.id)
+                .where(ChatMessage.sender_id != current_user_id)
+                .where(ChatMessage.created_at > current_member.last_read_at)
+            )
+            unread_count = len(list(session.exec(unread_stmt).all()))
+        elif chat.chat_type != "channel":
+            # Если нет last_read_at, считаем все сообщения непрочитанными
+            unread_stmt = (
+                select(ChatMessage)
+                .where(ChatMessage.chat_id == chat.id)
+                .where(ChatMessage.sender_id != current_user_id)
+            )
+            unread_count = len(list(session.exec(unread_stmt).all()))
 
     return ChatPublic(
         id=chat.id,
@@ -104,10 +144,12 @@ def _format_chat_public(
                 content=last_message.content,
                 created_at=last_message.created_at,
                 edited_at=last_message.edited_at,
+                is_read=last_message_is_read,
             )
             if last_message
             else None
         ),
+        unread_count=unread_count,
     )
 
 
@@ -160,29 +202,40 @@ def create_group_chat(
     chat_in: ChatCreate, session: SessionDep, current_user: CurrentUser
 ) -> Any:
     """Создать групповой чат"""
-    if chat_in.chat_type != "group":
+    if chat_in.chat_type not in ("group", "channel"):
         raise HTTPException(
-            status_code=400, detail="Use /private/{user_id} for private chats"
+            status_code=400, detail="Invalid chat type"
         )
 
-    if not chat_in.name:
-        raise HTTPException(status_code=400, detail="Group chat name is required")
+    if chat_in.chat_type == "channel" and not chat_in.name:
+        raise HTTPException(status_code=400, detail="Channel name is required")
 
-    if not chat_in.member_ids:
-        raise HTTPException(status_code=400, detail="At least one member is required")
+    if chat_in.chat_type == "group":
+        if not chat_in.name:
+            raise HTTPException(status_code=400, detail="Group chat name is required")
 
-    # Проверяем, что все пользователи существуют
-    for user_id in chat_in.member_ids:
-        user = session.get(User, user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+        if not chat_in.member_ids:
+            raise HTTPException(status_code=400, detail="At least one member is required")
 
-    chat = crud.create_group_chat(
-        session=session,
-        creator_id=current_user.id,
-        name=chat_in.name,
-        member_ids=chat_in.member_ids,
-    )
+        # Проверяем, что все пользователи существуют
+        for user_id in chat_in.member_ids:
+            user = session.get(User, user_id)
+            if not user:
+                raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+
+        chat = crud.create_group_chat(
+            session=session,
+            creator_id=current_user.id,
+            name=chat_in.name,
+            member_ids=chat_in.member_ids,
+        )
+    else:
+        # Создание канала
+        chat = crud.create_channel(
+            session=session,
+            creator_id=current_user.id,
+            name=chat_in.name,
+        )
 
     return _format_chat_public(chat, current_user.id, session)
 
@@ -258,6 +311,14 @@ def get_messages(
         limit=limit,
     )
 
+    # Получаем last_read_at для текущего пользователя
+    current_member = session.exec(
+        select(ChatMember).where(
+            ChatMember.chat_id == chat_id, ChatMember.user_id == current_user.id
+        )
+    ).first()
+    last_read_at = current_member.last_read_at if current_member else None
+
     messages_public = []
     for msg in messages:
         sender = session.get(User, msg.sender_id)
@@ -269,9 +330,16 @@ def get_messages(
                 avatar_url=sender.avatar_url,
                 is_active=sender.is_active,
                 is_superuser=sender.is_superuser,
+                is_online=sender.is_online,
+                last_seen_at=sender.last_seen_at,
+                timezone=sender.timezone,
             )
         else:
             sender_public = None
+        
+        # Проверяем, прочитано ли сообщение
+        is_read = last_read_at and msg.created_at <= last_read_at if last_read_at else False
+        
         messages_public.append(
             ChatMessagePublic(
                 id=msg.id,
@@ -285,6 +353,7 @@ def get_messages(
                 media_size=msg.media_size,
                 created_at=msg.created_at,
                 edited_at=msg.edited_at,
+                is_read=is_read,
             )
         )
 

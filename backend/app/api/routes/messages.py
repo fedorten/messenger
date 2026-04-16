@@ -52,6 +52,18 @@ async def create_message(
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
 
+    # Проверка для каналов - только админ может постить
+    if chat.chat_type == "channel":
+        member = session.exec(
+            select(ChatMember).where(
+                ChatMember.chat_id == chat_id, ChatMember.user_id == current_user.id
+            )
+        ).first()
+        if not member or member.role != "admin":
+            raise HTTPException(
+                status_code=403, detail="Only admins can post in channels"
+            )
+
     try:
         message = crud.create_message(
             session=session,
