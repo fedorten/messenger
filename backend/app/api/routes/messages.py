@@ -3,11 +3,13 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from sqlmodel import select
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.websocket import manager
 from app.models import (
+    ChatMember,
     ChatMessage,
     ChatMessageCreate,
     ChatMessagePublic,
@@ -81,6 +83,11 @@ async def create_message(
                 avatar_url=sender.avatar_url,
                 is_active=sender.is_active,
                 is_superuser=sender.is_superuser,
+                is_online=sender.is_online,
+                last_seen_at=sender.last_seen_at,
+                timezone=sender.timezone,
+                balance=sender.balance,
+                is_banned=sender.is_banned,
             )
         else:
             sender_public = None
@@ -132,6 +139,11 @@ def update_message(
             avatar_url=sender.avatar_url,
             is_active=sender.is_active,
             is_superuser=sender.is_superuser,
+            is_online=sender.is_online,
+            last_seen_at=sender.last_seen_at,
+            timezone=sender.timezone,
+            balance=sender.balance,
+            is_banned=sender.is_banned,
         )
     else:
         sender_public = None

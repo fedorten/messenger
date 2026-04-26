@@ -71,6 +71,8 @@ def _format_chat_public(
                         is_online=user.is_online,
                         last_seen_at=user.last_seen_at,
                         timezone=user.timezone,
+                        balance=user.balance,
+                        is_banned=user.is_banned,
                     ),
                     joined_at=member.joined_at,
                     last_read_at=member.last_read_at,
@@ -93,6 +95,8 @@ def _format_chat_public(
                 is_online=sender_user.is_online,
                 last_seen_at=sender_user.last_seen_at,
                 timezone=sender_user.timezone,
+                balance=sender_user.balance,
+                is_banned=sender_user.is_banned,
             )
         # Проверяем, прочитано ли сообщение
         current_member = session.exec(
@@ -119,8 +123,7 @@ def _format_chat_public(
                 .where(ChatMessage.created_at > current_member.last_read_at)
             )
             unread_count = len(list(session.exec(unread_stmt).all()))
-        elif chat.chat_type != "channel":
-            # Если нет last_read_at, считаем все сообщения непрочитанными
+        else:
             unread_stmt = (
                 select(ChatMessage)
                 .where(ChatMessage.chat_id == chat.id)
@@ -333,6 +336,8 @@ def get_messages(
                 is_online=sender.is_online,
                 last_seen_at=sender.last_seen_at,
                 timezone=sender.timezone,
+                balance=sender.balance,
+                is_banned=sender.is_banned,
             )
         else:
             sender_public = None
@@ -400,6 +405,11 @@ def update_member_role(
             avatar_url=user.avatar_url,
             is_active=user.is_active,
             is_superuser=user.is_superuser,
+            is_online=user.is_online,
+            last_seen_at=user.last_seen_at,
+            timezone=user.timezone,
+            balance=user.balance,
+            is_banned=user.is_banned,
         )
     else:
         user_public = None

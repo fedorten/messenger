@@ -70,13 +70,13 @@ class TransferShekels(SQLModel):
 class UserPublic(UserBase):
     id: int
     avatar_url: str | None = None
-    balance: int = 0
-    is_banned: bool = False
+    balance: int
+    is_banned: bool
     ban_reason: str | None = None
-    is_superuser: bool = False
-    is_online: bool = False
+    is_superuser: bool
+    is_online: bool
     last_seen_at: datetime | None = None
-    timezone: str = "UTC"
+    timezone: str
 
 
 class UserAdminPublic(UserBase):

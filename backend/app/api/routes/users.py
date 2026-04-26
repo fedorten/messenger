@@ -145,10 +145,6 @@ def update_password_me(
     """
     if not verify_password(body.current_password, current_user.hashed_password):
         raise HTTPException(status_code=400, detail="Incorrect password")
-    if body.current_password == body.new_password:
-        raise HTTPException(
-            status_code=400, detail="New password cannot be the same as the current one"
-        )
     hashed_password = get_password_hash(body.new_password)
     current_user.hashed_password = hashed_password
     session.add(current_user)
@@ -222,11 +218,8 @@ async def upload_avatar(
 
     # Удаляем старую аватарку
     if current_user.avatar_url:
-        old_path = (
-            base_path
-            / settings.MEDIA_UPLOAD_DIR
-            / current_user.avatar_url.lstrip("/media/avatars/")
-        )
+        old_filename = current_user.avatar_url.split("/")[-1]
+        old_path = base_path / settings.MEDIA_UPLOAD_DIR / "avatars" / old_filename
         if old_path.exists():
             try:
                 os.remove(old_path)
@@ -256,7 +249,7 @@ def delete_avatar(
     if current_user.avatar_url:
         base_path = Path(__file__).parent.parent.parent
         expected_dir = base_path / settings.MEDIA_UPLOAD_DIR / "avatars"
-        filename = current_user.avatar_url.lstrip("/media/avatars/")
+        filename = current_user.avatar_url.split("/")[-1]
         filename = filename.replace("..", "").replace("/", "").replace("\\", "")
         old_path = expected_dir / filename
         old_path = old_path.resolve()
@@ -302,26 +295,17 @@ def transfer_shekels(
     if not recipient:
         raise HTTPException(status_code=404, detail="Получатель не найден")
 
-    sender = session.exec(
-        select(User).where(User.id == current_user.id).with_for_update()
-    ).first()
-    recipient_locked = session.exec(
-        select(User).where(User.id == recipient.id).with_for_update()
-    ).first()
-    
-    if not sender or not recipient_locked:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    if sender.balance < transfer_data.amount:
+    if current_user.balance < transfer_data.amount:
         raise HTTPException(status_code=400, detail="Недостаточно шекелей")
 
-    sender.balance -= transfer_data.amount
-    recipient_locked.balance += transfer_data.amount
+    current_user.balance -= transfer_data.amount
+    recipient.balance += transfer_data.amount
 
-    session.add(sender)
-    session.add(recipient_locked)
+    session.add(current_user)
+    session.add(recipient)
     session.commit()
-    session.refresh(sender)
+    session.refresh(current_user)
+    session.refresh(recipient)
 
     return sender
 

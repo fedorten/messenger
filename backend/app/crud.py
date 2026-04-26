@@ -93,14 +93,44 @@ def get_or_create_private_chat(
     # Создаем новый приватный чат
     new_chat = Chat(chat_type="private")
     session.add(new_chat)
-    session.flush()
+    try:
+        session.flush()
+    except Exception:
+        session.rollback()
+        statement = (
+            select(Chat)
+            .join(ChatMember, Chat.id == ChatMember.chat_id)
+            .where(Chat.chat_type == "private")
+            .where(ChatMember.user_id.in_([user1_id, user2_id]))
+            .group_by(Chat.id)
+            .having(func.count(ChatMember.user_id) == 2)
+        )
+        existing_chat = session.exec(statement).first()
+        if existing_chat:
+            return existing_chat
+        raise
 
     # Добавляем обоих пользователей в чат
     member1 = ChatMember(chat_id=new_chat.id, user_id=user1_id, role="member")
     member2 = ChatMember(chat_id=new_chat.id, user_id=user2_id, role="member")
     session.add(member1)
     session.add(member2)
-    session.commit()
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        statement = (
+            select(Chat)
+            .join(ChatMember, Chat.id == ChatMember.chat_id)
+            .where(Chat.chat_type == "private")
+            .where(ChatMember.user_id.in_([user1_id, user2_id]))
+            .group_by(Chat.id)
+            .having(func.count(ChatMember.user_id) == 2)
+        )
+        existing_chat = session.exec(statement).first()
+        if existing_chat:
+            return existing_chat
+        raise
     session.refresh(new_chat)
     return new_chat
 
@@ -153,7 +183,8 @@ def update_user_online_status(
     user = session.get(User, user_id)
     if user:
         user.is_online = is_online
-        user.last_seen_at = datetime.now(timezone.utc) if not is_online else user.last_seen_at
+        if not is_online:
+            user.last_seen_at = datetime.now(timezone.utc)
         session.add(user)
         session.commit()
 
@@ -227,6 +258,7 @@ def create_message(
         from datetime import datetime, timezone
 
         chat.updated_at = datetime.now(timezone.utc)
+        session.add(chat)
 
     session.commit()
     session.refresh(message)

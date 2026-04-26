@@ -139,6 +139,10 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
             message_data = json.loads(data)
 
             if message_data.get("type") == "message":
+                content = message_data.get("content", "").strip()
+                if not content:
+                    await websocket.send_json({"type": "error", "message": "Message content cannot be empty"})
+                    continue
                 # Создаем сообщение
                 with Session(engine) as session:
                     try:
@@ -146,7 +150,7 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
                             session=session,
                             chat_id=chat_id,
                             sender_id=user.id,
-                            content=message_data.get("content", ""),
+                            content=content,
                             media_type=message_data.get("media_type"),
                             media_filename=message_data.get("media_filename"),
                             media_url=message_data.get("media_url"),
@@ -165,6 +169,8 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
                                 is_online=sender.is_online,
                                 last_seen_at=sender.last_seen_at,
                                 timezone=sender.timezone,
+                                balance=sender.balance,
+                                is_banned=sender.is_banned,
                             )
                         else:
                             sender_public = None
