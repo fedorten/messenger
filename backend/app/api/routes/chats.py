@@ -5,9 +5,12 @@ from sqlmodel import select
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep
+from app.api.routes.season_helpers import update_user_task_progress
 from app.models import (
     Chat,
     ChatAddMembers,
+    ChatBot,
+    ChatBotPublic,
     ChatCreate,
     ChatMember,
     ChatMemberPublic,
@@ -68,20 +71,26 @@ def _format_chat_public(
                         avatar_url=user.avatar_url,
                         is_active=user.is_active,
                         is_superuser=user.is_superuser,
-                        is_online=user.is_online,
-                        last_seen_at=user.last_seen_at,
-                        timezone=user.timezone,
                         balance=user.balance,
                         is_banned=user.is_banned,
+                        ban_reason=user.ban_reason,
+                        timezone=user.timezone,
+                        last_seen=user.last_seen,
+                        is_online=False,
+                        is_ultra=getattr(user, "is_ultra", False),
+                        ultra_expires_at=getattr(user, "ultra_expires_at", None),
+                        ultra_badge=getattr(user, "ultra_badge", None),
+                        ultra_profile_color=getattr(user, "ultra_profile_color", None),
+                        ultra_avatar_style=getattr(user, "ultra_avatar_style", None),
+                        is_verified=getattr(user, "is_verified", False),
                     ),
                     joined_at=member.joined_at,
                     last_read_at=member.last_read_at,
                 )
             )
 
-    # Получаем sender для last_message и проверяем прочитано ли
+    # Получаем sender для last_message
     last_message_sender = None
-    last_message_is_read = False
     if last_message:
         sender_user = session.get(User, last_message.sender_id)
         if sender_user:
@@ -92,49 +101,43 @@ def _format_chat_public(
                 avatar_url=sender_user.avatar_url,
                 is_active=sender_user.is_active,
                 is_superuser=sender_user.is_superuser,
-                is_online=sender_user.is_online,
-                last_seen_at=sender_user.last_seen_at,
-                timezone=sender_user.timezone,
                 balance=sender_user.balance,
                 is_banned=sender_user.is_banned,
+                ban_reason=sender_user.ban_reason,
+                timezone=sender_user.timezone,
+                last_seen=sender_user.last_seen,
+                is_online=False,
+                is_ultra=getattr(sender_user, "is_ultra", False),
+                ultra_expires_at=getattr(sender_user, "ultra_expires_at", None),
+                ultra_badge=getattr(sender_user, "ultra_badge", None),
+                ultra_profile_color=getattr(sender_user, "ultra_profile_color", None),
+                ultra_avatar_style=getattr(sender_user, "ultra_avatar_style", None),
+                is_verified=getattr(sender_user, "is_verified", False),
             )
-        # Проверяем, прочитано ли сообщение
-        current_member = session.exec(
-            select(ChatMember).where(
-                ChatMember.chat_id == chat.id, ChatMember.user_id == current_user_id
-            )
-        ).first()
-        if current_member and current_member.last_read_at:
-            last_message_is_read = last_message.created_at <= current_member.last_read_at
 
-    # Подсчитываем непрочитанные сообщения
-    unread_count = 0
-    if chat.chat_type != "channel":
-        current_member = session.exec(
-            select(ChatMember).where(
-                ChatMember.chat_id == chat.id, ChatMember.user_id == current_user_id
+    # Get bot info for bot chats
+    bot_data = None
+    if chat.chat_type == "bot" and chat.bot_id:
+        bot = session.get(ChatBot, chat.bot_id)
+        if bot:
+            bot_data = ChatBotPublic(
+                id=bot.id,
+                owner_id=bot.owner_id,
+                name=bot.name,
+                description=bot.description,
+                avatar_url=bot.avatar_url,
+                language=bot.language,
+                is_active=bot.is_active,
+                is_public=bot.is_public,
+                created_at=bot.created_at,
+                updated_at=bot.updated_at,
             )
-        ).first()
-        if current_member and current_member.last_read_at:
-            unread_stmt = (
-                select(ChatMessage)
-                .where(ChatMessage.chat_id == chat.id)
-                .where(ChatMessage.sender_id != current_user_id)
-                .where(ChatMessage.created_at > current_member.last_read_at)
-            )
-            unread_count = len(list(session.exec(unread_stmt).all()))
-        else:
-            unread_stmt = (
-                select(ChatMessage)
-                .where(ChatMessage.chat_id == chat.id)
-                .where(ChatMessage.sender_id != current_user_id)
-            )
-            unread_count = len(list(session.exec(unread_stmt).all()))
 
     return ChatPublic(
         id=chat.id,
         chat_type=chat.chat_type,
         name=chat_name,
+        avatar_url=chat.avatar_url,
         created_at=chat.created_at,
         updated_at=chat.updated_at,
         members=members_public,
@@ -147,12 +150,11 @@ def _format_chat_public(
                 content=last_message.content,
                 created_at=last_message.created_at,
                 edited_at=last_message.edited_at,
-                is_read=last_message_is_read,
             )
             if last_message
             else None
         ),
-        unread_count=unread_count,
+        bot=bot_data,
     )
 
 
@@ -205,40 +207,34 @@ def create_group_chat(
     chat_in: ChatCreate, session: SessionDep, current_user: CurrentUser
 ) -> Any:
     """Создать групповой чат"""
-    if chat_in.chat_type not in ("group", "channel"):
+    if chat_in.chat_type != "group":
         raise HTTPException(
-            status_code=400, detail="Invalid chat type"
+            status_code=400, detail="Use /private/{user_id} for private chats"
         )
 
-    if chat_in.chat_type == "channel" and not chat_in.name:
-        raise HTTPException(status_code=400, detail="Channel name is required")
+    if not chat_in.name:
+        raise HTTPException(status_code=400, detail="Group chat name is required")
 
-    if chat_in.chat_type == "group":
-        if not chat_in.name:
-            raise HTTPException(status_code=400, detail="Group chat name is required")
+    if not chat_in.member_ids:
+        raise HTTPException(status_code=400, detail="At least one member is required")
 
-        if not chat_in.member_ids:
-            raise HTTPException(status_code=400, detail="At least one member is required")
+    # Проверяем, что все пользователи существуют
+    for user_id in chat_in.member_ids:
+        user = session.get(User, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
 
-        # Проверяем, что все пользователи существуют
-        for user_id in chat_in.member_ids:
-            user = session.get(User, user_id)
-            if not user:
-                raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+    chat = crud.create_group_chat(
+        session=session,
+        creator_id=current_user.id,
+        name=chat_in.name,
+        member_ids=chat_in.member_ids,
+    )
 
-        chat = crud.create_group_chat(
-            session=session,
-            creator_id=current_user.id,
-            name=chat_in.name,
-            member_ids=chat_in.member_ids,
-        )
-    else:
-        # Создание канала
-        chat = crud.create_channel(
-            session=session,
-            creator_id=current_user.id,
-            name=chat_in.name,
-        )
+    try:
+        update_user_task_progress(session, current_user.id, "chats")
+    except:
+        pass
 
     return _format_chat_public(chat, current_user.id, session)
 
@@ -314,14 +310,6 @@ def get_messages(
         limit=limit,
     )
 
-    # Получаем last_read_at для текущего пользователя
-    current_member = session.exec(
-        select(ChatMember).where(
-            ChatMember.chat_id == chat_id, ChatMember.user_id == current_user.id
-        )
-    ).first()
-    last_read_at = current_member.last_read_at if current_member else None
-
     messages_public = []
     for msg in messages:
         sender = session.get(User, msg.sender_id)
@@ -333,18 +321,21 @@ def get_messages(
                 avatar_url=sender.avatar_url,
                 is_active=sender.is_active,
                 is_superuser=sender.is_superuser,
-                is_online=sender.is_online,
-                last_seen_at=sender.last_seen_at,
-                timezone=sender.timezone,
                 balance=sender.balance,
                 is_banned=sender.is_banned,
+                ban_reason=sender.ban_reason,
+                timezone=sender.timezone,
+                last_seen=sender.last_seen,
+                is_online=False,
+                is_ultra=getattr(sender, "is_ultra", False),
+                ultra_expires_at=getattr(sender, "ultra_expires_at", None),
+                ultra_badge=getattr(sender, "ultra_badge", None),
+                ultra_profile_color=getattr(sender, "ultra_profile_color", None),
+                ultra_avatar_style=getattr(sender, "ultra_avatar_style", None),
+                is_verified=getattr(sender, "is_verified", False),
             )
         else:
             sender_public = None
-        
-        # Проверяем, прочитано ли сообщение
-        is_read = last_read_at and msg.created_at <= last_read_at if last_read_at else False
-        
         messages_public.append(
             ChatMessagePublic(
                 id=msg.id,
@@ -358,7 +349,6 @@ def get_messages(
                 media_size=msg.media_size,
                 created_at=msg.created_at,
                 edited_at=msg.edited_at,
-                is_read=is_read,
             )
         )
 
@@ -405,11 +395,6 @@ def update_member_role(
             avatar_url=user.avatar_url,
             is_active=user.is_active,
             is_superuser=user.is_superuser,
-            is_online=user.is_online,
-            last_seen_at=user.last_seen_at,
-            timezone=user.timezone,
-            balance=user.balance,
-            is_banned=user.is_banned,
         )
     else:
         user_public = None
@@ -506,3 +491,79 @@ def update_chat_name(
         raise HTTPException(status_code=403, detail="Only admins can change group name")
 
     return _format_chat_public(updated_chat, current_user.id, session)
+
+
+@router.delete("/{chat_id}")
+def delete_chat(
+    chat_id: int,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Any:
+    """Удалить групповой чат (только админ или создатель)"""
+    from app.models import ChatMember
+
+    chat = session.get(Chat, chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    if chat.chat_type == "private":
+        raise HTTPException(status_code=400, detail="Cannot delete private chats")
+
+    # Check if user is admin or creator
+    member = session.exec(
+        select(ChatMember).where(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id == current_user.id,
+        )
+    ).first()
+
+    if not member or member.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can delete this chat")
+
+    session.delete(chat)
+    session.commit()
+    return Message(message="Chat deleted successfully")
+
+
+@router.patch("/{chat_id}/avatar")
+def update_chat_avatar(
+    chat_id: int,
+    session: SessionDep,
+    current_user: CurrentUser,
+    body: dict,
+) -> Any:
+    """Изменить аватар группы (только админ)"""
+    from app.models import ChatMember
+
+    avatar_url = body.get("avatar_url", "")
+    if not avatar_url:
+        raise HTTPException(status_code=400, detail="avatar_url is required")
+
+    chat = session.get(Chat, chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    if chat.chat_type == "private":
+        raise HTTPException(
+            status_code=400, detail="Cannot set avatar for private chats"
+        )
+
+    # Check if user is admin
+    member = session.exec(
+        select(ChatMember).where(
+            ChatMember.chat_id == chat_id,
+            ChatMember.user_id == current_user.id,
+        )
+    ).first()
+
+    if not member or member.role != "admin":
+        raise HTTPException(
+            status_code=403, detail="Only admins can change group avatar"
+        )
+
+    chat.avatar_url = avatar_url
+    session.add(chat)
+    session.commit()
+    session.refresh(chat)
+
+    return _format_chat_public(chat, current_user.id, session)

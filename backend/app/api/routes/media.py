@@ -15,6 +15,7 @@ from sqlmodel import Session, func, select
 from app import crud
 from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.websocket import manager
+from app.api.routes.season_helpers import update_user_task_progress
 from app.core.config import settings
 from app.models import (
     ChatMessage,
@@ -31,7 +32,13 @@ logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-ALLOWED_AUDIO_TYPES = {"audio/mpeg", "audio/wav", "audio/ogg", "audio/mp3"}
+ALLOWED_AUDIO_TYPES = {
+    "audio/mpeg",
+    "audio/wav",
+    "audio/ogg",
+    "audio/mp3",
+    "audio/webm",
+}
 ALLOWED_DOCUMENT_TYPES = {
     "application/pdf",
     "application/msword",

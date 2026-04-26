@@ -14,11 +14,10 @@
           maxlength="50"
           autofocus
         />
-        <span v-if="isChannel" class="channel-type-badge">Канал</span>
-      </div>
+</div>
       <div class="header-actions">
         <button
-          v-if="isGroupChat || isChannel"
+          v-if="isGroupChat"
           @click="showGroupMembers = true"
           class="members-btn"
           title="Участники"
@@ -34,7 +33,7 @@
           +
         </button>
         <button
-          v-if="(isGroupChat && isAdmin) || (isChannel && isAdmin)"
+          v-if="isGroupChat && isAdmin"
           @click="isEditingName = true"
           class="settings-btn"
           title="Настройки"
@@ -56,19 +55,20 @@
             <img 
               v-if="message.sender?.avatar_url" 
               :src="message.sender.avatar_url" 
-              class="message-avatar" 
+              :class="['message-avatar', getAvatarClass(message)]"
             />
-            <div v-else class="message-avatar-placeholder">
+            <div v-else :class="['message-avatar-placeholder', getAvatarClass(message)]">
               {{ getSenderInitials(message) }}
             </div>
-            <span 
-              v-if="message.sender?.is_online" 
-              class="online-indicator-small"
-            ></span>
+            <span v-if="message.sender_id !== currentUserId && isUserOnline(message.sender_id)" class="online-indicator"></span>
           </div>
           <div class="message-body">
             <div class="message-header">
-              <strong>{{ getSenderName(message) }}</strong>
+              <span class="sender-name-wrapper">
+                <strong :style="getSenderStyle(message)">{{ getSenderName(message) }}</strong>
+                <span v-if="message.sender?.is_verified" class="verified-badge" title="Верифицирован">✓</span>
+                <span v-if="isSenderUltra(message)" class="ultra-badge-small">⚡</span>
+              </span>
               <div class="message-actions">
                 <span class="message-time">{{ formatTime(message.created_at) }}</span>
                 <span v-if="message.sender_id === currentUserId" class="read-status">
@@ -110,8 +110,39 @@
         </div>
       </div>
 
+      <div v-if="typingUser" class="typing-indicator">
+        {{ typingUser }} печатает
+      </div>
+
+      <!-- Incoming Call Modal -->
+      <div v-if="incomingCall" class="call-modal incoming-call">
+        <div class="call-content">
+          <div class="call-icon">📞</div>
+          <div class="call-status">Входящий звонок</div>
+          <div class="call-user">{{ incomingCall.from_user_name || 'Пользователь' }}</div>
+          <div class="call-actions">
+            <button @click="acceptCall" class="accept-btn">Принять</button>
+            <button @click="declineCall" class="decline-btn">Отклонить</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Active Call Modal -->
+      <div v-else-if="inCall" class="call-modal">
+        <div class="call-info">
+          <div class="call-status">
+            <span v-if="callStatus === 'calling'">Звоним...</span>
+            <span v-else-if="callStatus === 'connected'">Соединено</span>
+            <span v-else>Звонок</span>
+          </div>
+          <div class="call-user">{{ remoteUser?.name || 'Пользователь' }}</div>
+        </div>
+        <button @click="endCall" class="end-call-btn">Завершить</button>
+        <audio ref="audioRef" autoplay></audio>
+      </div>
+
       <div class="input-container">
-        <label v-if="canSendMessage" class="attach-btn">
+        <label class="attach-btn">
           <input
             type="file"
             ref="fileInput"
@@ -124,23 +155,80 @@
           </svg>
         </label>
         <input
-          v-if="canSendMessage"
           v-model="newMessage"
           type="text"
           placeholder="Введите сообщение..."
           @keyup.enter="sendMessage"
           @input="handleTyping"
         />
-        <div v-else class="no-permission-message">
-          Только администраторы могут публиковать сообщения
-        </div>
-        <button v-if="canSendMessage" @click="sendMessage" :disabled="!newMessage.trim() && !selectedFile">
+        <button @click="sendToAI" class="ai-btn" title="Отправить ИИ">
+          ✨
+        </button>
+        <button @click="sendMessage" :disabled="!newMessage.trim() && !selectedFile">
           Отправить
         </button>
       </div>
       <div v-if="selectedFile" class="file-preview">
         <span class="file-name">{{ selectedFile.name }}</span>
         <button @click="clearFile" class="clear-file">×</button>
+      </div>
+    </div>
+
+    <!-- AI Modal -->
+    <div v-if="showAIModal" class="modal-overlay" @click.self="showAIModal = false">
+      <div class="modal-content ai-modal">
+        <div class="modal-header">
+          <h3>{{ aiMode === 'chat' ? 'Чат с ИИ' : 'Редактирование сообщения' }}</h3>
+          <button @click="showAIModal = false" class="close-btn">×</button>
+        </div>
+        
+        <div v-if="aiMode === 'edit'" class="ai-edit-mode">
+          <div class="form-group">
+            <label>Введи запрос:</label>
+            <textarea 
+              v-model="aiEditPrompt" 
+              placeholder="Опиши как изменить сообщение..."
+              class="input"
+            ></textarea>
+          </div>
+          
+          <div class="form-group">
+            <label>Твой текст:</label>
+            <textarea 
+              v-model="aiEditText" 
+              placeholder="Текст для изменения"
+              class="input"
+            ></textarea>
+          </div>
+          
+          <div class="form-group">
+            <label>Результат:</label>
+            <textarea 
+              v-model="aiResult" 
+              placeholder="Здесь появится отредактированное сообщение"
+              class="input"
+              readonly
+            ></textarea>
+          </div>
+          
+          <div class="modal-actions">
+            <button @click="showAIModal = false" class="btn-secondary">Отмена</button>
+            <button 
+              @click="applyAIEdit" 
+              class="btn-primary"
+            >Отправить</button>
+            <button 
+              v-if="aiResult"
+              @click="applyAIResult" 
+              class="btn-primary"
+            >Применить</button>
+          </div>
+        </div>
+        
+        <div v-else class="ai-chat-mode">
+          <p class="ai-hint">Напиши что хочешь спросить у ИИ</p>
+          <button @click="sendAIChat" class="btn-primary">Отправить вопрос</button>
+        </div>
       </div>
     </div>
 
@@ -251,7 +339,7 @@
 </template>
 
 <script>
-import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { chatsAPI, messagesAPI, authAPI } from '../services/api'
 import { ChatWebSocket } from '../services/websocket'
@@ -267,11 +355,13 @@ export default {
     const newMessage = ref('')
     const chatName = ref('Чат')
     const currentUserId = ref(null)
+    const currentUser = ref(null)  // Для хранения полных данных пользователя
     const messagesContainer = ref(null)
     const ws = ref(null)
     const shouldAutoScroll = ref(true)
     const isGroupChat = ref(false)
-    const isChannel = ref(false)
+    const isBotChat = ref(false)
+    const currentBot = ref(null)
     const isAdmin = ref(false)
     const isEditingName = ref(false)
     const editedName = ref('')
@@ -286,6 +376,29 @@ export default {
     const fileInput = ref(null)
     const selectedFile = ref(null)
     const uploading = ref(false)
+    const onlineUsers = ref(new Set())
+    const typingUser = ref(null)
+    let typingTimeout = null
+    
+    // Call state
+    const inCall = ref(false)
+    const callStatus = ref('') // 'calling', 'ringing', 'connected', 'ended'
+    const remoteUser = ref(null)
+    const localStream = ref(null)
+    const peerConnection = ref(null)
+    const incomingCall = ref(null)
+    const audioRef = ref(null)
+
+    const isUserOnline = (userId) => onlineUsers.value.has(userId)
+
+    const getSenderInitials = (message) => {
+      if (message.sender_id === 0 && isBotChat.value) {
+        const botName = currentBot.value?.name || 'Бот'
+        return botName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+      }
+      const name = message.sender?.full_name || message.sender?.email || 'Пользователь'
+      return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+    }
 
     const loadChat = async () => {
       try {
@@ -293,9 +406,13 @@ export default {
         currentChat.value = chat
         chatName.value = getChatName(chat)
         isGroupChat.value = chat.chat_type === 'group'
-        isChannel.value = chat.chat_type === 'channel'
+        isBotChat.value = chat.chat_type === 'bot'
         
-        if (isGroupChat.value || isChannel.value) {
+        if (isBotChat.value && chat.bot) {
+          currentBot.value = chat.bot
+        }
+        
+        if (isGroupChat.value) {
           const myMember = chat.members?.find(m => m.user_id === currentUserId.value)
           isAdmin.value = myMember?.role === 'admin'
         }
@@ -319,15 +436,13 @@ export default {
       try {
         const response = await chatsAPI.getMessages(chatId)
         messages.value = response.data || []
-        // Устанавливаем флаг автоматической прокрутки
+        await chatsAPI.markAsRead(chatId)
         shouldAutoScroll.value = true
       } catch (error) {
         console.error('Error loading messages:', error)
       } finally {
         loading.value = false
-        // Прокручиваем вниз после того, как loading станет false и DOM обновится
         await nextTick()
-        // Используем несколько попыток для надежной прокрутки
         setTimeout(() => {
           scrollToBottom(true)
         }, 100)
@@ -341,44 +456,74 @@ export default {
       if (message.sender_id === currentUserId.value) {
         return 'Вы'
       }
+      if (message.sender_id === 0 && isBotChat.value) {
+        return currentBot.value?.name || 'Бот'
+      }
       return message.sender?.full_name || message.sender?.email || 'Пользователь'
     }
 
-    const getSenderInitials = (message) => {
-      const name = message.sender?.full_name || message.sender?.email || 'Пользователь'
-      return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+    const isSenderUltra = (message) => {
+      if (message.sender_id === currentUserId.value) {
+        return currentUser.value?.is_ultra || false
+      }
+      return message.sender?.is_ultra || false
     }
 
-    const formatTime = (dateString, userTimezone = null) => {
-      const date = new Date(dateString)
+    const getSenderStyle = (message) => {
+      const isUltra = message.sender_id === currentUserId.value 
+        ? (currentUser.value?.is_ultra || false)
+        : (message.sender?.is_ultra || false)
       
-      // Используем часовой пояс пользователя если указан
-      if (userTimezone) {
-        try {
-          const formatter = new Intl.DateTimeFormat('ru-RU', {
-            timeZone: userTimezone,
-            hour: '2-digit',
-            minute: '2-digit',
-          })
-          return formatter.format(date)
-        } catch (e) {
-          // Если часовой пояс невалидный, используем локальное время
-        }
+      if (!isUltra) return {}
+      
+      // For self - use localStorage. For others - use sender data from server (from DB)
+      let color
+      if (message.sender_id === currentUserId.value) {
+        color = localStorage.getItem('ultra_profile_color')
+      } else {
+        // Get from sender data which comes from server/DB
+        color = message.sender?.ultra_profile_color || null
       }
       
-      return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+      if (!color) return {}
+      
+      if (color.includes('gradient')) {
+        return { 
+          background: color, 
+          WebkitBackgroundClip: 'text', 
+          WebkitTextFillColor: 'transparent',
+          backgroundClip: 'text'
+        }
+      }
+      return { color: color }
     }
 
-    const canSendMessage = computed(() => {
-      if (!currentChat.value) return false
-      // Приватный чат - все могут отправлять
-      if (currentChat.value.chat_type === 'private') return true
-      // Группа - все участники могут отправлять
-      if (currentChat.value.chat_type === 'group') return true
-      // Канал - только админ может отправлять
-      if (currentChat.value.chat_type === 'channel') return isAdmin.value
-      return false
-    })
+    const getAvatarClass = (message) => {
+      const isUltra = message.sender_id === currentUserId.value 
+        ? (currentUser.value?.is_ultra || false)
+        : (message.sender?.is_ultra || false)
+      
+      if (!isUltra) return ''
+      
+      // For self - use localStorage. For others - use sender data from server (from DB)
+      let style
+      if (message.sender_id === currentUserId.value) {
+        style = localStorage.getItem('ultra_avatar_style') || 'default'
+      } else {
+        // Get from sender data which comes from server/DB
+        style = message.sender?.ultra_avatar_style || 'default'
+      }
+      
+      if (style === 'gold') return 'avatar-gold'
+      if (style === 'border') return 'avatar-border'
+      if (style === 'shine') return 'avatar-shine'
+      return ''
+    }
+
+    const formatTime = (dateString) => {
+      const date = new Date(dateString)
+      return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+    }
 
     const scrollToBottom = async (force = false) => {
       if (!force && !shouldAutoScroll.value) return
@@ -453,7 +598,14 @@ export default {
           id: tempId,
           chat_id: chatId,
           sender_id: currentUserId.value,
-          sender: { id: currentUserId.value, email: '', full_name: 'Вы' },
+          sender: { 
+            id: currentUserId.value, 
+            email: currentUser.value?.email || '', 
+            full_name: 'Вы',
+            is_ultra: currentUser.value?.is_ultra || false,
+            ultra_profile_color: localStorage.getItem('ultra_profile_color'),
+            ultra_avatar_style: localStorage.getItem('ultra_avatar_style'),
+          },
           content: content,
           media_type: mediaData?.media_type || null,
           media_filename: mediaData?.media_filename || null,
@@ -499,6 +651,105 @@ export default {
         }
       }
     }
+    
+    const showAIModal = ref(false)
+    const aiEditText = ref('')
+    const aiEditPrompt = ref('')
+    const aiMode = ref('edit')
+    const aiResult = ref('')
+    
+    const sendToAI = async () => {
+      // Always show edit mode first
+      showAIModal.value = true
+      aiMode.value = 'edit'
+      aiEditText.value = newMessage.value.trim()
+      aiEditPrompt.value = ''
+    }
+    
+    const applyAIEdit = async () => {
+      const prompt = aiEditPrompt.value
+      const text = aiEditText.value
+      
+      if (!prompt.trim() || !text.trim()) {
+        alert('Заполни оба поля!')
+        return
+      }
+      
+      const fullPrompt = prompt + ': ' + text
+      
+      try {
+        const token = localStorage.getItem('access_token')
+        
+        const response = await fetch('/api/v1/messages/ai/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({ message: fullPrompt })
+        })
+        
+        if (!response.ok) {
+          alert('Ошибка: ' + response.status)
+          return
+        }
+        
+        const res = await response.json()
+        
+        if (res.response) {
+          aiResult.value = res.response
+        }
+        
+      } catch (e) {
+        alert('Ошибка: ' + e.message)
+      }
+    }
+    
+    const applyAIResult = () => {
+      if (aiResult.value) {
+        newMessage.value = aiResult.value
+        showAIModal.value = false
+        aiEditText.value = ''
+        aiEditPrompt.value = ''
+        aiResult.value = ''
+      }
+    }
+    
+    const sendAIChat = async () => {
+      const text = newMessage.value.trim()
+      if (!text) return
+      
+      // Show user message in chat temporarily
+      const tempId = `temp-${Date.now()}`
+      messages.value.push({
+        id: tempId,
+        chat_id: chatId,
+        sender_id: currentUserId.value,
+        sender: { id: currentUserId.value, full_name: 'Вы' },
+        content: text,
+        created_at: new Date().toISOString(),
+        isTemp: true
+      })
+      newMessage.value = ''
+      scrollToBottom()
+      
+      try {
+        const res = await messagesAPI.chatWithAI(text)
+        // Add AI response
+        messages.value.push({
+          id: `ai-${Date.now()}`,
+          chat_id: chatId,
+          sender_id: 0,
+          sender: null,
+          content: res.response,
+          created_at: new Date().toISOString()
+        })
+        scrollToBottom()
+      } catch (e) {
+        console.error('AI error:', e)
+        alert('Ошибка ИИ')
+      }
+    }
 
     const handleTyping = () => {
       if (ws.value) {
@@ -533,52 +784,69 @@ export default {
         chatId,
         token,
         (data) => {
-          console.log('WebSocket callback received data:', data)
+          console.log('WebSocket message:', data)
+          
           if (data.type === 'new_message') {
             const message = data.message
-            console.log('Processing new message:', message)
-            
-            // Используем nextTick для обеспечения реактивности Vue
             nextTick(() => {
-              // Проверяем, нет ли уже такого сообщения по ID (чтобы избежать дубликатов)
               const existingIndex = messages.value.findIndex(m => m.id === message.id)
               if (existingIndex !== -1) {
-                // Сообщение уже есть, обновляем его
-                console.log('Updating existing message at index:', existingIndex)
-                // Создаем новый массив для правильного обновления реактивности Vue
                 const newMessages = [...messages.value]
                 newMessages[existingIndex] = message
                 messages.value = newMessages
               } else {
-                // Ищем временное сообщение с таким же содержимым и отправителем
-                // Проверяем, что это наше сообщение (от нас же)
                 const isOurMessage = message.sender_id === currentUserId.value
                 const tempIndex = messages.value.findIndex(
-                  m => m.isTemp && 
-                       m.content === message.content && 
-                       m.sender_id === message.sender_id &&
-                       isOurMessage // Только для наших сообщений
+                  m => m.isTemp && m.content === message.content && m.sender_id === message.sender_id && isOurMessage
                 )
-                
                 if (tempIndex !== -1) {
-                  // Заменяем временное сообщение на реальное
-                  console.log('Replacing temp message at index:', tempIndex)
-                  // Создаем новый массив для правильного обновления реактивности Vue
                   const newMessages = [...messages.value]
                   newMessages[tempIndex] = message
                   messages.value = newMessages
                 } else {
-                  // Это новое сообщение от другого пользователя или наше, но без временного
-                  console.log('Adding new message', isOurMessage ? 'from us (no temp found)' : 'from other user')
-                  // Создаем новый массив для принудительного обновления реактивности
                   messages.value = [...messages.value, message]
                 }
               }
-              // Прокручиваем вниз после обновления сообщений
-            scrollToBottom()
+              scrollToBottom()
             })
-          } else {
-            console.log('Received WebSocket message with type:', data.type)
+          } else if (data.type === 'user_online') {
+            onlineUsers.value.add(data.user_id)
+          } else if (data.type === 'user_offline') {
+            onlineUsers.value.delete(data.user_id)
+          } else if (data.type === 'typing') {
+            if (data.user_id !== currentUserId.value) {
+              typingUser.value = data.user_name || 'Пользователь'
+              if (typingTimeout) clearTimeout(typingTimeout)
+              typingTimeout = setTimeout(() => {
+                typingUser.value = null
+              }, 3000)
+            }
+          } else if (data.type === 'new_message') {
+            const msg = data.message
+            if (!messages.value.find(m => m.id === msg.id)) {
+              messages.value = [...messages.value, msg]
+              scrollToBottom()
+            }
+          } else if (data.type === 'call_offer') {
+            // Only process if this call is for us
+            if (data.target_user_id === currentUserId.value) {
+              handleIncomingCall(data)
+            }
+          } else if (data.type === 'call_answer') {
+            // Only process if this answer is for us
+            if (data.target_user_id === currentUserId.value) {
+              handleCallAnswer(data)
+            }
+          } else if (data.type === 'call_ice') {
+            // Only process if this ICE is for us
+            if (data.target_user_id === currentUserId.value) {
+              handleRemoteIce(data)
+            }
+          } else if (data.type === 'call_end') {
+            // Only process if this end is for us
+            if (data.target_user_id === currentUserId.value) {
+              endCall()
+            }
           }
         },
         (error) => {
@@ -587,6 +855,243 @@ export default {
       )
 
       ws.value.connect()
+    }
+
+    // Call functions
+    const getOtherUserId = () => {
+      if (!currentChat.value || isGroupChat.value) return null
+      const other = currentChat.value.members?.find(m => m.user_id !== currentUserId.value)
+      return other?.user_id || null
+    }
+
+    const startCall = async () => {
+      const targetUserId = getOtherUserId()
+      if (!targetUserId) {
+        alert('Звонки доступны только в личных чатах')
+        return
+      }
+
+      if (!ws.value || !ws.value.ws || ws.value.ws.readyState !== WebSocket.OPEN) {
+        alert('Подключение не установлено. Попробуйте позже.')
+        return
+      }
+
+      try {
+        localStream.value = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+        
+        peerConnection.value = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        })
+
+        localStream.value.getTracks().forEach(track => {
+          peerConnection.value.addTrack(track, localStream.value)
+        })
+
+        peerConnection.value.ontrack = (event) => {
+          const audioEl = audioRef.value
+          if (audioEl && event.streams[0]) {
+            audioEl.srcObject = event.streams[0]
+          }
+        }
+
+        peerConnection.value.onicecandidate = (event) => {
+          if (event.candidate && ws.value?.ws) {
+            ws.value.ws.send(JSON.stringify({
+              type: 'call_ice',
+              target_user_id: targetUserId,
+              candidate: event.candidate
+            }))
+          }
+        }
+
+        const offer = await peerConnection.value.createOffer()
+        await peerConnection.value.setLocalDescription(offer)
+
+        inCall.value = true
+        callStatus.value = 'calling'
+        remoteUser.value = { id: targetUserId }
+
+        ws.value.ws.send(JSON.stringify({
+          type: 'call_offer',
+          target_user_id: targetUserId,
+          chat_id: chatId,
+          sdp: peerConnection.value.localDescription
+        }))
+
+      } catch (error) {
+        console.error('Error starting call:', error)
+        alert('Не удалось начать звонок: ' + error.message)
+        endCall()
+      }
+    }
+
+    const handleIncomingCall = (data) => {
+      console.log('Incoming call:', data)
+      incomingCall.value = data
+      // Play ringtone
+      const ringtone = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2teleR4HLp3W6p97IRc2iNLrsYsdHDiMxemmVB8NNY3P6bJOHB08jMTrr1IcHD+L0OqxUB0fP4rP6bFSHSBCh87rsFEcIEEEAtLqsFAdIEGFAtLqsFAdIEEAAAAAA==')
+      ringtone.loop = true
+      ringtone.volume = 0.5
+      ringtone.play().catch(() => {})
+      incomingCall.value.ringtone = ringtone
+    }
+
+    const acceptCall = async () => {
+      const data = incomingCall.value
+      if (data.ringtone) {
+        data.ringtone.pause()
+        data.ringtone = null
+      }
+      incomingCall.value = null
+
+      try {
+        localStream.value = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+        
+        peerConnection.value = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        })
+
+        localStream.value.getTracks().forEach(track => {
+          peerConnection.value.addTrack(track, localStream.value)
+        })
+
+        peerConnection.value.ontrack = (event) => {
+          const audioEl = audioRef.value
+          if (audioEl && event.streams[0]) {
+            audioEl.srcObject = event.streams[0]
+          }
+        }
+
+        peerConnection.value.onicecandidate = (event) => {
+          if (event.candidate && ws.value?.ws) {
+            ws.value.ws.send(JSON.stringify({
+              type: 'call_ice',
+              target_user_id: data.from_user_id,
+              candidate: event.candidate
+            }))
+          }
+        }
+
+        await peerConnection.value.setRemoteDescription(new RTCSessionDescription(data.sdp))
+        const answer = await peerConnection.value.createAnswer()
+        await peerConnection.value.setLocalDescription(answer)
+
+        inCall.value = true
+        callStatus.value = 'connected'
+        remoteUser.value = { id: data.from_user_id, name: data.from_user_name }
+
+        ws.value.ws.send(JSON.stringify({
+          type: 'call_answer',
+          target_user_id: data.from_user_id,
+          accepted: true,
+          sdp: peerConnection.value.localDescription
+        }))
+      } catch (error) {
+        console.error('Error accepting call:', error)
+        endCall()
+      }
+    }
+
+    const declineCall = () => {
+      const data = incomingCall.value
+      if (data) {
+        if (data.ringtone) {
+          data.ringtone.pause()
+          data.ringtone = null
+        }
+        if (ws.value?.ws) {
+          ws.value.ws.send(JSON.stringify({
+            type: 'call_answer',
+            target_user_id: data.from_user_id,
+            accepted: false
+          }))
+        }
+      }
+      incomingCall.value = null
+    }
+
+    const handleCallAnswer = async (data) => {
+      console.log('Call answer received:', data)
+      if (!peerConnection.value) {
+        console.log('No peer connection, initiating answerer side')
+        try {
+          localStream.value = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+          
+          peerConnection.value = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+          })
+          
+          localStream.value.getTracks().forEach(track => {
+            peerConnection.value.addTrack(track, localStream.value)
+          })
+          
+          peerConnection.value.ontrack = (event) => {
+            const audioEl = audioRef.value
+            if (audioEl && event.streams[0]) {
+              audioEl.srcObject = event.streams[0]
+            }
+          }
+          
+          peerConnection.value.onicecandidate = (event) => {
+            if (event.candidate && ws.value?.ws) {
+              ws.value.ws.send(JSON.stringify({
+                type: 'call_ice',
+                target_user_id: data.from_user_id,
+                candidate: event.candidate
+              }))
+            }
+          }
+        } catch (err) {
+          console.error('Error setting up peer connection:', err)
+          return
+        }
+      }
+
+      try {
+        if (data.accepted && data.sdp) {
+          await peerConnection.value.setRemoteDescription(new RTCSessionDescription(data.sdp))
+          callStatus.value = 'connected'
+        } else {
+          alert('Звонок отклонён')
+          endCall()
+        }
+      } catch (error) {
+        console.error('Error handling call answer:', error)
+        endCall()
+      }
+    }
+
+    const handleRemoteIce = async (data) => {
+      if (!peerConnection.value) return
+      try {
+        await peerConnection.value.addIceCandidate(new RTCIceCandidate(data.candidate))
+      } catch (error) {
+        console.error('Error adding ICE candidate:', error)
+      }
+    }
+
+    const endCall = () => {
+      if (localStream.value) {
+        localStream.value.getTracks().forEach(track => track.stop())
+        localStream.value = null
+      }
+      if (peerConnection.value) {
+        peerConnection.value.close()
+        peerConnection.value = null
+      }
+      
+      const targetId = remoteUser.value?.id || getOtherUserId()
+      if (targetId && ws.value?.ws) {
+        ws.value.ws.send(JSON.stringify({
+          type: 'call_end',
+          target_user_id: targetId
+        }))
+      }
+
+      inCall.value = false
+      callStatus.value = ''
+      remoteUser.value = null
+      incomingCall.value = null
     }
 
     const handleMemberSearch = async () => {
@@ -746,9 +1251,27 @@ export default {
       try {
         const user = await authAPI.getCurrentUser()
         currentUserId.value = user.id
+        currentUser.value = user  // Сохраняем полные данные пользователя
         await loadChat()
         await loadMessages()
         setupWebSocket()
+        
+        // Polling for new messages (fallback if WebSocket fails)
+        setInterval(async () => {
+          if (!ws.value || !ws.value.ws || ws.value.ws.readyState !== WebSocket.OPEN) {
+            try {
+              const response = await chatsAPI.getMessages(chatId)
+              const newMessages = response.data || []
+              const lastMsgId = messages.value.length > 0 ? Math.max(...messages.value.map(m => m.id)) : 0
+              const unread = newMessages.filter(m => m.id > lastMsgId)
+              if (unread.length > 0) {
+                messages.value = [...messages.value, ...unread]
+                scrollToBottom()
+              }
+            } catch (e) {}
+          }
+        }, 3000)
+        
         // Дополнительная прокрутка после полной загрузки компонента
         await nextTick()
         setTimeout(() => {
@@ -764,6 +1287,8 @@ export default {
       if (ws.value) {
         ws.value.disconnect()
       }
+      if (typingTimeout) clearTimeout(typingTimeout)
+      endCall()
     })
 
     watch(() => route.params.chatId, async (newChatId) => {
@@ -797,9 +1322,11 @@ export default {
       newMessage,
       chatName,
       currentUserId,
+      currentUser,
       messagesContainer,
       isGroupChat,
-      isChannel,
+      isBotChat,
+      currentBot,
       isAdmin,
       isEditingName,
       editedName,
@@ -814,26 +1341,40 @@ export default {
       uploading,
       fileInput,
       currentChat,
-      canSendMessage,
       sendMessage,
       handleTyping,
       getSenderName,
       getSenderInitials,
+      getSenderStyle,
+      isSenderUltra,
+      getAvatarClass,
       formatTime,
       handleFileSelect,
       clearFile,
       handleMemberSearch,
+      setupWebSocket,
       toggleAddMember,
       isAddMemberSelected,
       removeAddMember,
       addMembersToGroup,
       goBack,
-      deleteMessage,
+deleteMessage,
       toggleRole,
+      sendToAI,
+      showAIModal,
+      aiEditText,
+      aiEditPrompt,
+      aiMode,
+      aiResult,
+      applyAIEdit,
+      applyAIResult,
       removeMemberFromGroup,
       leaveGroup,
       saveChatName,
       cancelEditName,
+      isUserOnline,
+      onlineUsers,
+      typingUser,
     }
   },
 }
@@ -891,6 +1432,11 @@ export default {
   flex: 1;
   overflow: hidden;
   background: var(--bg-dark);
+  pointer-events: none;
+}
+
+.chat-content > * {
+  pointer-events: auto;
 }
 
 .messages-container {
@@ -939,6 +1485,71 @@ export default {
   border: 2px solid var(--primary-purple);
 }
 
+.message-avatar-placeholder {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary-purple) 0%, var(--primary-purple-light) 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+  border: 2px solid var(--primary-purple);
+}
+
+.message-avatar.avatar-gold,
+.message-avatar-placeholder.avatar-gold {
+  border: 3px solid #ffd700;
+  box-shadow: 0 0 15px rgba(255, 215, 0, 0.5);
+}
+
+.message-avatar.avatar-border,
+.message-avatar-placeholder.avatar-border {
+  border: 3px solid #9333ea;
+  box-shadow: 0 0 10px rgba(147, 51, 234, 0.5);
+}
+
+.message-avatar.avatar-shine,
+.message-avatar-placeholder.avatar-shine {
+  position: relative;
+}
+
+.message-avatar.avatar-shine::after,
+.message-avatar-placeholder.avatar-shine::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, transparent 40%, rgba(255,255,255,0.3) 50%, transparent 60%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.avatar-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.avatar-wrapper .online-indicator {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  background: #22c55e;
+  border: 2px solid var(--bg-dark);
+  border-radius: 50%;
+}
+
+.own-message .avatar-wrapper .online-indicator {
+  border-color: var(--primary-purple);
+}
+
 .message-body {
   flex: 1;
   min-width: 0;
@@ -963,8 +1574,44 @@ export default {
 .message-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   margin-bottom: 0.5rem;
   font-size: 0.85rem;
+}
+
+.message-header strong {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.ultra-badge-small {
+  font-size: 0.9rem;
+}
+
+.verified-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: #3b82f6;
+  color: white;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  font-weight: bold;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.sender-name-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ultra-badge-small {
+  font-size: 0.9rem;
 }
 
 .message-actions {
@@ -1028,6 +1675,127 @@ export default {
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.2);
 }
 
+.typing-indicator {
+  padding: 0.5rem 1rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-style: italic;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-color);
+}
+
+.call-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+}
+
+.call-modal.incoming-call {
+  background: linear-gradient(135deg, #0f3460 0%, #16213e 100%);
+}
+
+.call-info {
+  text-align: center;
+  color: white;
+}
+
+.call-content {
+  text-align: center;
+  color: white;
+}
+
+.call-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+.call-status {
+  font-size: 1.2rem;
+  margin-bottom: 1rem;
+  color: var(--primary-purple-light);
+}
+
+.call-user {
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin-bottom: 2rem;
+}
+
+.call-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.accept-btn {
+  padding: 1rem 2rem;
+  background: #22c55e;
+  color: white;
+  border: none;
+  border-radius: 50px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.accept-btn:hover {
+  transform: scale(1.05);
+}
+
+.decline-btn {
+  padding: 1rem 2rem;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 50px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.decline-btn:hover {
+  transform: scale(1.05);
+}
+
+.end-call-btn {
+  padding: 1rem 2rem;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 50px;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.call-btn {
+  padding: 0.5rem;
+  background: rgba(10, 10, 10, 0.5);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1.2rem;
+  transition: all 0.3s ease;
+}
+
+.call-btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--primary-purple);
+}
+
 .input-container input {
   flex: 1;
   padding: 0.875rem 1rem;
@@ -1073,6 +1841,51 @@ export default {
   cursor: not-allowed;
   box-shadow: none;
   opacity: 0.5;
+}
+
+.voice-btn {
+  padding: 0.5rem;
+  background: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1.2rem;
+  transition: all 0.3s ease;
+}
+
+.voice-btn:hover {
+  background: var(--bg-card-hover);
+}
+
+.voice-btn.recording {
+  background: #ef4444;
+  border-color: #ef4444;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  font-weight: 500;
+}
+
+.recording-dot {
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .loading {
@@ -1131,6 +1944,9 @@ export default {
   border: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
+  z-index: 1001;
+  position: relative;
+  pointer-events: auto;
 }
 
 .modal-header {
@@ -1628,62 +2444,130 @@ export default {
   border-color: var(--primary-purple);
 }
 
-.channel-type-badge {
-  display: block;
-  font-size: 0.75rem;
-  color: var(--success);
-  margin-top: 2px;
-}
-
-.avatar-wrapper {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.message-avatar-placeholder {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--primary-purple) 0%, var(--primary-purple-light) 100%);
+.ai-btn {
+  padding: 10px 16px;
+  background: #9333ea;
   color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 0.9rem;
-  flex-shrink: 0;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 18px;
 }
 
-.online-indicator-small {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 10px;
-  height: 10px;
-  background: var(--success);
-  border: 2px solid var(--bg-card);
-  border-radius: 50%;
+.ai-btn:hover {
+  background: #7c3aed;
 }
 
-.read-status {
-  font-size: 0.75rem;
-  color: var(--primary-purple-light);
-  margin-right: 0.5rem;
+.ai-modal {
+  max-width: 500px;
 }
 
-.own-message .read-status {
-  color: rgba(255, 255, 255, 0.8);
+.ai-modal .btn-primary {
+  padding: 12px 24px;
+  background: linear-gradient(135deg, var(--primary-purple) 0%, #7c3aed 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
 }
 
-.no-permission-message {
-  flex: 1;
-  padding: 0.875rem 1rem;
+.ai-modal .btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(147, 51, 234, 0.4);
+}
+
+.ai-modal .btn-secondary {
+  padding: 12px 24px;
+  background: transparent;
   color: var(--text-secondary);
-  font-size: 0.9rem;
-  text-align: center;
-  background: rgba(10, 10, 10, 0.3);
   border: 1px solid var(--border-color);
   border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.ai-modal .btn-secondary:hover {
+  border-color: var(--primary-purple);
+  color: var(--text-primary);
+}
+
+.ai-modal .input {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 14px;
+  resize: vertical;
+  min-height: 80px;
+}
+
+.ai-modal .input:focus {
+  outline: none;
+  border-color: var(--primary-purple);
+  box-shadow: 0 0 0 3px rgba(147, 51, 234, 0.2);
+}
+
+.ai-modal .input::placeholder {
+  color: var(--text-secondary);
+}
+
+.ai-edit-mode .form-group {
+  margin-bottom: 16px;
+}
+
+.ai-edit-mode label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+}
+
+.ai-templates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-template-btn {
+  padding: 8px 16px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.ai-template-btn:hover {
+  border-color: var(--primary-purple);
+}
+
+.ai-template-btn.active {
+  background: var(--primary-purple);
+  color: white;
+  border-color: var(--primary-purple);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.ai-chat-mode {
+  padding: 20px;
+  text-align: center;
+}
+
+.ai-hint {
+  color: var(--text-secondary);
+  margin-bottom: 16px;
 }
 </style>
 

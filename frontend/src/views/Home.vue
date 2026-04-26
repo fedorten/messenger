@@ -3,24 +3,63 @@
     <header class="header">
       <h1>Fusion</h1>
       <div class="header-actions">
-        <router-link v-if="currentUser && currentUser.is_superuser" to="/admin" class="admin-link">⚙️ Админ</router-link>
-        <router-link to="/profile" class="profile-link">Профиль</router-link>
+        <button v-if="activeSeason" @click="showSeasonModal = true" class="season-btn">
+          🏆 {{ activeSeason.name }}
+        </button>
+        <router-link v-if="currentUser && currentUser.is_superuser" to="/admin" class="admin-link">⚙️</router-link>
+        <router-link to="/forum" class="forum-link">📋</router-link>
+        <router-link to="/channels" class="channels-link">📢</router-link>
+        <router-link to="/bots" class="bots-link">🤖</router-link>
+        <router-link to="/services" class="services-link">🛠</router-link>
+        <router-link to="/profile" class="profile-link">👤</router-link>
         <button @click="handleLogout" class="logout-btn">Выйти</button>
       </div>
     </header>
+
+    <!-- Сезон модальное окно -->
+    <div v-if="showSeasonModal" class="modal-overlay" @click.self="showSeasonModal = false">
+      <div class="season-modal">
+        <h2>🏆 {{ activeSeason?.name }}</h2>
+        <div class="season-progress">
+          <div class="progress-bar">
+            <div class="progress-fill" :style="{ width: (seasonProgress.progress * 10) + '%' }"></div>
+          </div>
+          <span>Прогресс: {{ seasonProgress.progress }}/10 заданий</span>
+          <span>Заработано: {{ seasonProgress.total_reward_earned }} шекелей</span>
+        </div>
+        <div class="season-tasks">
+          <h3>Задания сезона</h3>
+          <div v-for="task in seasonTasks" :key="task.id" class="task-item">
+            <div class="task-info">
+              <strong>{{ task.name }}</strong>
+              <p>{{ task.description || 'Выполните это задание' }}</p>
+              <span class="task-target">Прогресс: {{ task.current_progress }}/{{ task.target_count }}</span>
+            </div>
+            <div class="task-reward">
+              <span>Награда: {{ task.base_reward }}+ шекелей</span>
+              <button 
+                v-if="!task.is_completed"
+                @click="claimTask(task.id)"
+                class="claim-btn"
+                :disabled="task.current_progress < task.target_count"
+              >
+                {{ task.current_progress >= task.target_count ? 'Получить' : 'В процессе' }}
+              </button>
+              <span v-else class="completed-badge">Выполнено</span>
+            </div>
+          </div>
+        </div>
+        <button @click="showSeasonModal = false" class="close-btn">Закрыть</button>
+      </div>
+    </div>
 
     <div class="content">
       <div class="search-section">
         <div class="section-header">
           <h2>Поиск пользователей</h2>
-          <div class="header-btns">
-            <button @click="showCreateChannel = true" class="create-channel-btn" title="Создать канал">
-              <span>#</span> Канал
-            </button>
-            <button @click="showCreateGroup = true" class="create-group-btn" title="Создать групповой чат">
-              <span>+</span> Группа
-            </button>
-          </div>
+          <button @click="showCreateGroup = true" class="create-group-btn" title="Создать групповой чат">
+            <span>+</span> Группа
+          </button>
         </div>
         <div class="search-box">
           <input
@@ -32,20 +71,22 @@
           <div v-if="searching" class="loading">Поиск...</div>
           <div v-if="searchResults.length > 0" class="search-results">
             <div
-              v-for="user in searchResults"
-              :key="user.id"
+              v-for="item in searchResults"
+              :key="item.id"
               class="user-item"
-              @click="startChat(user)"
+              @click="item.type === 'bot' ? startChatWithBot(item) : startChat(item)"
             >
               <div class="user-info">
-                <strong>{{ user.full_name || user.email }}</strong>
-                <span class="user-email">{{ user.email }}</span>
+                <span v-if="item.type === 'bot'" class="type-badge">🤖</span>
+                <strong>{{ item.name || item.full_name || item.email }}</strong>
+                <span v-if="item.type === 'bot'" class="bot-badge">Бот</span>
+                <span v-else class="user-email">{{ item.email }}</span>
               </div>
-              <button class="chat-btn">Написать</button>
+              <button class="chat-btn">{{ item.type === 'bot' ? 'Чат' : 'Написать' }}</button>
             </div>
           </div>
           <div v-if="searchQuery && !searching && searchResults.length === 0" class="no-results">
-            Пользователи не найдены
+            Пользователи и боты не найдены
           </div>
         </div>
       </div>
@@ -57,8 +98,11 @@
           У вас пока нет чатов. Найдите пользователя и начните переписку!
         </div>
         <div v-else class="chats-list">
-          <div class="chat-item"
-            :class="{ 'group-chat': chat.chat_type === 'group', 'channel-chat': chat.chat_type === 'channel' }"
+          <div
+            v-for="chat in chats.filter(c => c.chat_type !== 'bot')"
+            :key="chat.id"
+            class="chat-item"
+            :class="{ 'group-chat': chat.chat_type === 'group' }"
             @click="openChat(chat.id)"
           >
             <div class="avatar-wrapper">
@@ -70,30 +114,23 @@
               <div v-else class="chat-avatar-placeholder">
                 {{ getChatInitials(chat) }}
               </div>
-              <span 
-                v-if="chat.chat_type === 'private' && getOtherMemberOnlineStatus(chat)" 
-                class="online-indicator"
-              ></span>
+              <span v-if="chat.chat_type === 'private' && getOtherMemberUserId(chat) && isUserOnline(getOtherMemberUserId(chat))" class="online-indicator"></span>
             </div>
             <div class="chat-info">
               <div class="chat-name-row">
                 <strong>{{ getChatName(chat) }}</strong>
                 <span v-if="chat.chat_type === 'group'" class="group-badge">Группа</span>
-                <span v-if="chat.chat_type === 'channel'" class="channel-badge">Канал</span>
+                <span v-if="chat.chat_type === 'bot'" class="bot-badge">Бот</span>
+                <span v-if="isOtherMemberVerified(chat)" class="verified-badge-small">✓</span>
+                <span v-if="isOtherMemberUltra(chat)" class="ultra-badge">⚡</span>
               </div>
               <span v-if="chat.last_message" class="last-message">
-                <span v-if="!chat.last_message.is_read && chat.chat_type !== 'channel'" class="unread-dot"></span>
                 {{ chat.last_message.content }}
               </span>
             </div>
-            <div class="chat-right">
-              <span v-if="chat.last_message" class="chat-time">
-                {{ formatTime(chat.last_message.created_at) }}
-              </span>
-              <span v-if="chat.unread_count > 0 && chat.chat_type !== 'channel'" class="unread-badge">
-                {{ chat.unread_count > 99 ? '99+' : chat.unread_count }}
-              </span>
-            </div>
+            <span v-if="chat.last_message" class="chat-time">
+              {{ formatTime(chat.last_message.created_at) }}
+            </span>
           </div>
         </div>
       </div>
@@ -168,45 +205,13 @@
         </div>
       </div>
     </div>
-
-    <!-- Модальное окно создания канала -->
-    <div v-if="showCreateChannel" class="modal-overlay" @click.self="showCreateChannel = false">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3>Создать канал</h3>
-          <button @click="showCreateChannel = false" class="close-btn">×</button>
-        </div>
-        <div class="modal-body">
-          <div class="form-group">
-            <label>Название канала:</label>
-            <input
-              v-model="newChannelName"
-              type="text"
-              placeholder="Введите название канала"
-              maxlength="50"
-            />
-          </div>
-          <div v-if="channelError" class="error">{{ channelError }}</div>
-        </div>
-        <div class="modal-footer">
-          <button @click="showCreateChannel = false" class="cancel-btn">Отмена</button>
-          <button
-            @click="createChannel"
-            :disabled="!newChannelName.trim() || creatingChannel"
-            class="create-btn"
-          >
-            {{ creatingChannel ? 'Создание...' : 'Создать' }}
-          </button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { usersAPI, chatsAPI } from '../services/api'
+import { usersAPI, chatsAPI, botsAPI } from '../services/api'
 
 export default {
   name: 'Home',
@@ -215,6 +220,7 @@ export default {
     const searchQuery = ref('')
     const searchResults = ref([])
     const searching = ref(false)
+    let searchTimeout = null
     const chats = ref([])
     const loadingChats = ref(false)
     const currentUser = ref(null)
@@ -225,10 +231,46 @@ export default {
     const selectedMembers = ref([])
     const creatingGroup = ref(false)
     const groupError = ref('')
-    const showCreateChannel = ref(false)
-    const newChannelName = ref('')
-    const creatingChannel = ref(false)
-    const channelError = ref('')
+    const activeSeason = ref(null)
+    const seasonProgress = ref({ progress: 0, completed_tasks: [], total_reward_earned: 0 })
+    const seasonTasks = ref([])
+    const showSeasonModal = ref(false)
+    const onlineUsers = ref(new Set())
+
+    const initWebSocket = () => {
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? `${protocol}//localhost:8000/api/v1/ws/0?token=${token}`
+        : `${protocol}//${window.location.host}/api/v1/ws/0?token=${token}`
+
+      try {
+        ws.value = new WebSocket(wsUrl)
+
+        ws.value.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data)
+            if (data.type === 'online_users' && data.users) {
+              onlineUsers.value = new Set(data.users)
+            } else if (data.type === 'user_online') {
+              onlineUsers.value.add(data.user_id)
+            } else if (data.type === 'user_offline') {
+              onlineUsers.value.delete(data.user_id)
+            }
+          } catch (e) {}
+        }
+
+        ws.value.onerror = () => {}
+        ws.value.onclose = () => {}
+        ws.value.onopen = () => {}
+      } catch (e) {
+        console.log('WS error:', e)
+      }
+    }
+
+    const isUserOnline = (userId) => onlineUsers.value.has(userId)
 
     const handleSearch = async () => {
       if (!searchQuery.value.trim()) {
@@ -236,16 +278,53 @@ export default {
         return
       }
 
-      searching.value = true
-      try {
-        const response = await usersAPI.search(searchQuery.value)
-        searchResults.value = response.data || []
-      } catch (error) {
-        console.error('Search error:', error)
+      // Clear previous timeout
+      if (searchTimeout) clearTimeout(searchTimeout)
+      
+      searchTimeout = setTimeout(async () => {
+        searching.value = true
         searchResults.value = []
-      } finally {
-        searching.value = false
-      }
+        
+        try {
+          console.log('=== SEARCH START ===')
+          console.log('Query:', searchQuery.value)
+          
+          // Fetch bots using search endpoint
+          let botsData = []
+          try {
+            const botsRes = await botsAPI.searchBots(searchQuery.value)
+            botsData = botsRes || []
+            console.log('Bots raw:', botsData)
+          } catch (bote) {
+            console.error('Bots search error:', bots)
+          }
+          
+          // Fetch users
+          let usersData = []
+          try {
+            const usersRes = await usersAPI.search(searchQuery.value)
+            usersData = usersRes.data || []
+            console.log('Users:', usersData)
+          } catch (ue) {
+            console.error('Users fetch error:', ue)
+          }
+          
+          // Bots already filtered by backend, just add type
+          const bots = botsData.map(b => ({ ...b, type: 'bot' }))
+          
+          console.log('Filtered bots:', bots)
+          console.log('=== SEARCH END ===')
+          
+          const users = usersData.map(u => ({ ...u, type: 'user' }))
+          searchResults.value = [...bots, ...users]
+          
+        } catch (error) {
+          console.error('Search error:', error)
+          searchResults.value = []
+        } finally {
+          searching.value = false
+        }
+      }, 300)
     }
 
     const startChat = async (user) => {
@@ -256,6 +335,10 @@ export default {
         console.error('Error creating chat:', error)
         alert('Ошибка создания чата')
       }
+    }
+
+    const startChatWithBot = async (bot) => {
+      alert('Чат с ботом доступен на странице Боты')
     }
 
     const openChat = (chatId) => {
@@ -275,6 +358,7 @@ export default {
 
     const getChatAvatar = (chat) => {
       if (chat.chat_type === 'group') return null
+      if (chat.chat_type === 'bot' && chat.bot?.avatar_url) return chat.bot.avatar_url
       if (chat.members && chat.members.length > 0) {
         const otherMember = chat.members.find(m => m.user_id !== (currentUser.value ? currentUser.value.id : null))
         if (otherMember && otherMember.user?.avatar_url) {
@@ -285,35 +369,38 @@ export default {
     }
 
     const getChatInitials = (chat) => {
+      if (chat.chat_type === 'bot') {
+        const name = chat.bot?.name || 'Бот'
+        return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+      }
       const name = getChatName(chat)
-      if (!name || name === 'Чат') return chat.chat_type === 'channel' ? '#' : '?'
-      if (chat.chat_type === 'channel') return '#'
+      if (!name || name === 'Чат') return '?'
       return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     }
 
-    const getOtherMemberOnlineStatus = (chat) => {
-      if (chat.chat_type !== 'private' || !chat.members) return false
-      const otherMember = chat.members.find(m => m.user_id !== (currentUser.value ? currentUser.value.id : null))
-      return otherMember?.user?.is_online || false
+    const getOtherMemberUserId = (chat) => {
+      if (chat.chat_type === 'group') return null
+      if (chat.members && chat.members.length > 0) {
+        const otherMember = chat.members.find(m => m.user_id !== (currentUser.value ? currentUser.value.id : null))
+        return otherMember?.user_id || null
+      }
+      return null
     }
 
-    const formatTime = (dateString, userTimezone = null) => {
+    const isOtherMemberUltra = (chat) => {
+      if (chat.chat_type === 'group' || !chat.members) return false
+      const otherMember = chat.members.find(m => m.user_id !== (currentUser.value ? currentUser.value.id : null))
+      return otherMember?.user?.is_ultra || false
+    }
+
+    const isOtherMemberVerified = (chat) => {
+      if (chat.chat_type === 'group' || !chat.members) return false
+      const otherMember = chat.members.find(m => m.user_id !== (currentUser.value ? currentUser.value.id : null))
+      return otherMember?.user?.is_verified || false
+    }
+
+    const formatTime = (dateString) => {
       const date = new Date(dateString)
-      
-      // Используем часовой пояс пользователя если указан
-      if (userTimezone) {
-        try {
-          const formatter = new Intl.DateTimeFormat('ru-RU', {
-            timeZone: userTimezone,
-            hour: '2-digit',
-            minute: '2-digit',
-          })
-          return formatter.format(date)
-        } catch (e) {
-          // Если часовой пояс невалидный, используем локальное время
-        }
-      }
-      
       const now = new Date()
       const diff = now - date
       const minutes = Math.floor(diff / 60000)
@@ -409,36 +496,37 @@ export default {
       }
     }
 
-    const createChannel = async () => {
-      if (!newChannelName.value.trim()) {
-        channelError.value = 'Введите название канала'
-        return
-      }
-
-      creatingChannel.value = true
-      channelError.value = ''
-
-      try {
-        const chat = await chatsAPI.createChannel(newChannelName.value)
-        
-        // Сброс формы
-        showCreateChannel.value = false
-        newChannelName.value = ''
-        
-        // Обновляем список чатов и переходим в новый канал
-        await loadChats()
-        router.push(`/chat/${chat.id}`)
-      } catch (error) {
-        console.error('Error creating channel:', error)
-        channelError.value = error.response?.data?.detail || 'Ошибка создания канала'
-      } finally {
-        creatingChannel.value = false
-      }
-    }
-
     const handleLogout = () => {
       localStorage.removeItem('access_token')
       router.push('/login')
+    }
+
+    const loadSeasonData = async () => {
+      try {
+        const { default: api } = await import('../services/api')
+        const seasonRes = await api.get('/seasons/active')
+        activeSeason.value = seasonRes.data
+        if (seasonRes.data) {
+          const progressRes = await api.get('/seasons/my-progress')
+          seasonProgress.value = progressRes.data || { progress: 0, completed_tasks: [], total_reward_earned: 0 }
+          const tasksRes = await api.get(`/seasons/${seasonRes.data.id}/tasks`)
+          seasonTasks.value = tasksRes.data || []
+        }
+      } catch (error) {
+        console.error('Error loading season:', error)
+      }
+    }
+
+    const claimTask = async (taskId) => {
+      try {
+        const { default: api } = await import('../services/api')
+        await api.post('/seasons/claim-task', { task_id: taskId })
+        await loadSeasonData()
+        alert('Награда получена!')
+      } catch (error) {
+        console.error('Error claiming task:', error)
+        alert(error.response?.data?.detail || 'Ошибка получения награды')
+      }
     }
 
     onMounted(async () => {
@@ -449,6 +537,16 @@ export default {
         console.error('Error loading user:', error)
       }
       await loadChats()
+      await loadSeasonData()
+      initWebSocket()
+      
+      // Polling for new chats (fallback)
+      setInterval(async () => {
+        try {
+          const response = await chatsAPI.getChats()
+          chats.value = response.data || []
+        } catch (e) {}
+      }, 5000)
     })
 
     return {
@@ -465,25 +563,30 @@ export default {
       selectedMembers,
       creatingGroup,
       groupError,
-      showCreateChannel,
-      newChannelName,
-      creatingChannel,
-      channelError,
       handleSearch,
       startChat,
+      startChatWithBot,
       openChat,
       getChatName,
       getChatAvatar,
       getChatInitials,
-      getOtherMemberOnlineStatus,
       formatTime,
       handleGroupMemberSearch,
       toggleGroupMember,
       isMemberSelected,
       removeMember,
       createGroupChat,
-      createChannel,
       handleLogout,
+      activeSeason,
+      seasonProgress,
+      seasonTasks,
+      showSeasonModal,
+      claimTask,
+      onlineUsers,
+      isUserOnline,
+      getOtherMemberUserId,
+      isOtherMemberUltra,
+      isOtherMemberVerified,
     }
   },
 }
@@ -542,13 +645,34 @@ export default {
 .admin-link {
   color: var(--primary-purple-light);
   text-decoration: none;
-  font-weight: 500;
-  transition: color 0.3s ease;
+  font-size: 1.25rem;
+  transition: all 0.3s ease;
 }
 
 .admin-link:hover {
-  color: var(--primary-purple);
-  text-decoration: underline;
+  transform: scale(1.1);
+}
+
+.bots-link {
+  color: var(--primary-purple-light);
+  text-decoration: none;
+  font-size: 1.25rem;
+  transition: all 0.3s ease;
+}
+
+.bots-link:hover {
+  transform: scale(1.1);
+}
+
+.profile-link {
+  color: var(--primary-purple-light);
+  text-decoration: none;
+  font-size: 1.25rem;
+  transition: all 0.3s ease;
+}
+
+.profile-link:hover {
+  transform: scale(1.1);
 }
 
 .logout-btn {
@@ -678,6 +802,20 @@ h2 {
   margin-bottom: 0.25rem;
 }
 
+.type-badge {
+  margin-right: 5px;
+  font-size: 1.2rem;
+}
+
+.bot-badge {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  background: #9333ea;
+  border-radius: 4px;
+  margin-left: 8px;
+  color: white;
+}
+
 .user-email {
   font-size: 0.85rem;
   color: var(--text-secondary);
@@ -727,6 +865,22 @@ h2 {
   border: 2px solid var(--primary-purple);
 }
 
+.avatar-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.online-indicator {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  background: #22c55e;
+  border: 2px solid var(--bg-dark);
+  border-radius: 50%;
+}
+
 .chat-avatar-placeholder {
   width: 40px;
   height: 40px;
@@ -749,92 +903,6 @@ h2 {
 
 .chat-item.group-chat {
   border-left: 3px solid var(--primary-purple);
-}
-
-.chat-item.channel-chat {
-  border-left: 3px solid var(--success);
-}
-
-.avatar-wrapper {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.online-indicator {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 12px;
-  height: 12px;
-  background: var(--success);
-  border: 2px solid var(--bg-card);
-  border-radius: 50%;
-}
-
-.unread-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  background: var(--primary-purple);
-  border-radius: 50%;
-  margin-right: 6px;
-}
-
-.chat-right {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-}
-
-.unread-badge {
-  background: var(--primary-purple);
-  color: white;
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 10px;
-  min-width: 18px;
-  text-align: center;
-}
-
-.header-btns {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.create-channel-btn {
-  padding: 0.5rem 1rem;
-  background: rgba(34, 197, 94, 0.2);
-  color: var(--success);
-  border: 1px solid var(--success);
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 500;
-  font-size: 0.9rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  transition: all 0.3s ease;
-}
-
-.create-channel-btn:hover {
-  background: rgba(34, 197, 94, 0.3);
-  transform: translateY(-2px);
-}
-
-.create-channel-btn span {
-  font-size: 1.2rem;
-  font-weight: 700;
-}
-
-.channel-badge {
-  font-size: 0.7rem;
-  padding: 0.2rem 0.5rem;
-  background: rgba(34, 197, 94, 0.2);
-  color: var(--success);
-  border-radius: 4px;
-  font-weight: 500;
 }
 
 .chat-info {
@@ -861,6 +929,39 @@ h2 {
   color: var(--primary-purple-light);
   border-radius: 4px;
   font-weight: 500;
+}
+
+.bot-badge {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.ultra-badge {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  background: linear-gradient(135deg, #ffd700 0%, #ff8c00 100%);
+  color: #000;
+  border-radius: 4px;
+  font-weight: 600;
+  margin-left: 0.5rem;
+}
+
+.verified-badge-small {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  background: #3b82f6;
+  color: white;
+  border-radius: 50%;
+  font-size: 0.6rem;
+  font-weight: bold;
+  margin-left: 0.25rem;
 }
 
 .last-message {
@@ -1149,6 +1250,170 @@ h2 {
     max-width: 100%;
     margin: 1rem;
   }
+}
+
+.season-btn {
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.season-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 1.5rem;
+  max-width: 500px;
+  width: 90%;
+}
+
+.season-modal h2 {
+  color: var(--text-primary);
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.season-progress {
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.progress-bar {
+  height: 20px;
+  background: rgba(10, 10, 10, 0.5);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+  transition: width 0.3s ease;
+}
+
+.season-tasks h3 {
+  color: var(--text-primary);
+  margin-bottom: 1rem;
+}
+
+.task-item {
+  background: rgba(10, 10, 10, 0.3);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.task-info strong {
+  color: var(--text-primary);
+}
+
+.task-info p {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin: 0.25rem 0;
+}
+
+.task-target {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.task-reward {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.claim-btn {
+  padding: 0.375rem 0.75rem;
+  background: var(--primary-purple);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+}
+
+.completed-badge {
+  color: #22c55e;
+  font-weight: 600;
+}
+
+.menu-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.menu-btn {
+  padding: 0.625rem 1.25rem;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.menu-btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--primary-purple);
+}
+
+.dropdown-content {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 0.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  min-width: 160px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.menu-dropdown:hover .dropdown-content {
+  display: block;
+}
+
+.dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  color: var(--text-primary);
+  text-decoration: none;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+
+.dropdown-item:hover {
+  background: var(--bg-card-hover);
+}
+
+.dropdown-item.logout {
+  color: var(--error);
+}
+
+.close-btn {
+  width: 100%;
+  padding: 0.75rem;
+  margin-top: 1rem;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
 }
 </style>
 

@@ -2,12 +2,13 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Annotated
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlmodel import Session, func, select
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
+from pydantic import BaseModel
+from sqlmodel import Field, Session, SQLModel, func, select
 
 from app import crud
 from app.api.deps import (
@@ -55,12 +56,53 @@ def search_users(
     return UsersPublic(data=users, count=len(users))
 
 
+@router.get("/leaderboard", response_model=list[UserPublic])
+def get_leaderboard(
+    session: SessionDep,
+    limit: int = Query(default=20, le=100),
+) -> Any:
+    """Получить топ пользователей по балансу"""
+    users = session.exec(
+        select(User)
+        .where(User.is_active == True)
+        .order_by(User.balance.desc())
+        .limit(limit)
+    ).all()
+    return [
+        UserPublic(
+            id=user.id,
+            email=user.email,
+            full_name=user.full_name,
+            avatar_url=user.avatar_url,
+            is_active=user.is_active,
+            is_superuser=user.is_superuser,
+            balance=user.balance,
+            is_banned=user.is_banned,
+            ban_reason=user.ban_reason,
+            timezone=user.timezone,
+            last_seen=user.last_seen,
+            is_online=False,
+            is_ultra=getattr(user, "is_ultra", False),
+            ultra_expires_at=getattr(user, "ultra_expires_at", None),
+            ultra_badge=getattr(user, "ultra_badge", None),
+            ultra_profile_color=getattr(user, "ultra_profile_color", None),
+            ultra_avatar_style=getattr(user, "ultra_avatar_style", None),
+            is_verified=getattr(user, "is_verified", False),
+        )
+        for user in users
+    ]
+
+
 @router.get(
     "/",
     dependencies=[Depends(get_current_active_superuser)],
     response_model=UsersPublic,
 )
-def read_users(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
+def read_users(
+    session: SessionDep,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+) -> Any:
     """
     Retrieve users.
     """
@@ -123,13 +165,18 @@ def update_user_me(
     return current_user
 
 
-@router.patch("/me/timezone", response_model=UserPublic)
+class UpdateTimezone(BaseModel):
+    timezone: str
+
+
+@router.post("/me/timezone", response_model=UserPublic)
 def update_timezone(
-    *, session: SessionDep, body: dict, current_user: CurrentUser
+    session: SessionDep,
+    current_user: CurrentUser,
+    tz_data: UpdateTimezone,
 ) -> Any:
-    """Обновить часовой пояс пользователя"""
-    timezone = body.get("timezone", "UTC")
-    current_user.timezone = timezone
+    """Обновить часовой пояс"""
+    current_user.timezone = tz_data.timezone
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
@@ -145,38 +192,15 @@ def update_password_me(
     """
     if not verify_password(body.current_password, current_user.hashed_password):
         raise HTTPException(status_code=400, detail="Incorrect password")
+    if body.current_password == body.new_password:
+        raise HTTPException(
+            status_code=400, detail="New password cannot be the same as the current one"
+        )
     hashed_password = get_password_hash(body.new_password)
     current_user.hashed_password = hashed_password
     session.add(current_user)
     session.commit()
     return Message(message="Password updated successfully")
-
-
-ALLOWED_IMAGE_SIGNATURES = {
-    b"\xff\xd8\xff": "jpeg",
-    b"\x89PNG\r\n\x1a\n": "png",
-    b"GIF87a": "gif",
-    b"GIF89a": "gif",
-    b"RIFF": "webp",
-    b"BM": "bmp",
-}
-
-VALID_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp", "bmp"}
-
-
-def validate_image_content(content: bytes) -> str | None:
-    for magic, ext in ALLOWED_IMAGE_SIGNATURES.items():
-        if content.startswith(magic):
-            return ext
-    return None
-
-
-def get_directory_size(path: Path) -> int:
-    total = 0
-    for entry in path.rglob("*"):
-        if entry.is_file():
-            total += entry.stat().st_size
-    return total
 
 
 @router.post("/me/avatar", response_model=UserPublic)
@@ -191,35 +215,38 @@ async def upload_avatar(
 
     logger.info("upload_avatar called")
 
+    # Проверяем тип файла
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only images allowed")
+
+    # Проверяем размер (макс 2 МБ)
     content = await file.read()
     if len(content) > 2 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 2MB)")
 
-    image_ext = validate_image_content(content)
-    if not image_ext:
-        raise HTTPException(status_code=400, detail="Only images allowed")
-    
+    # Получаем путь к медиа директории
     base_path = Path(__file__).parent.parent.parent
     avatar_dir = base_path / settings.MEDIA_UPLOAD_DIR / "avatars"
     avatar_dir.mkdir(parents=True, exist_ok=True)
-    
-    current_size = get_directory_size(avatar_dir)
-    if current_size + len(content) > settings.MEDIA_STORAGE_LIMIT:
-        raise HTTPException(status_code=400, detail="Storage limit exceeded")
-
     logger.info(f"Saving avatar to: {avatar_dir}")
 
-    filename = f"user_{current_user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{image_ext}"
+    # Генерируем имя файла
+    ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+    filename = f"user_{current_user.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{ext}"
     filepath = avatar_dir / filename
 
+    # Сохраняем файл
     with open(filepath, "wb") as f:
         f.write(content)
     logger.info(f"Saved avatar: {filepath}")
 
     # Удаляем старую аватарку
     if current_user.avatar_url:
-        old_filename = current_user.avatar_url.split("/")[-1]
-        old_path = base_path / settings.MEDIA_UPLOAD_DIR / "avatars" / old_filename
+        old_path = (
+            base_path
+            / settings.MEDIA_UPLOAD_DIR
+            / current_user.avatar_url.lstrip("/media/avatars/")
+        )
         if old_path.exists():
             try:
                 os.remove(old_path)
@@ -249,11 +276,15 @@ def delete_avatar(
     if current_user.avatar_url:
         base_path = Path(__file__).parent.parent.parent
         expected_dir = base_path / settings.MEDIA_UPLOAD_DIR / "avatars"
-        filename = current_user.avatar_url.split("/")[-1]
+        filename = current_user.avatar_url.lstrip("/media/avatars/")
         filename = filename.replace("..", "").replace("/", "").replace("\\", "")
         old_path = expected_dir / filename
         old_path = old_path.resolve()
-        if old_path.exists() and old_path.is_file() and old_path.parent.resolve() == expected_dir.resolve():
+        if (
+            old_path.exists()
+            and old_path.is_file()
+            and old_path.parent.resolve() == expected_dir.resolve()
+        ):
             try:
                 os.remove(old_path)
             except:
@@ -272,6 +303,9 @@ def read_user_me(current_user: CurrentUser) -> Any:
     """
     Get current user.
     """
+    # Superusers are always verified
+    if current_user.is_superuser:
+        current_user.is_verified = True
     return current_user
 
 
@@ -295,17 +329,26 @@ def transfer_shekels(
     if not recipient:
         raise HTTPException(status_code=404, detail="Получатель не найден")
 
-    if current_user.balance < transfer_data.amount:
+    sender = session.exec(
+        select(User).where(User.id == current_user.id).with_for_update()
+    ).first()
+    recipient_locked = session.exec(
+        select(User).where(User.id == recipient.id).with_for_update()
+    ).first()
+
+    if not sender or not recipient_locked:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if sender.balance < transfer_data.amount:
         raise HTTPException(status_code=400, detail="Недостаточно шекелей")
 
-    current_user.balance -= transfer_data.amount
-    recipient.balance += transfer_data.amount
+    sender.balance -= transfer_data.amount
+    recipient_locked.balance += transfer_data.amount
 
-    session.add(current_user)
-    session.add(recipient)
+    session.add(sender)
+    session.add(recipient_locked)
     session.commit()
-    session.refresh(current_user)
-    session.refresh(recipient)
+    session.refresh(sender)
 
     return sender
 
@@ -340,6 +383,125 @@ def register_user(session: SessionDep, user_in: UserRegister) -> Any:
     return user
 
 
+@router.get(
+    "/all",
+    dependencies=[Depends(get_current_active_superuser)],
+    response_model=UsersPublic,
+)
+def get_all_users(
+    session: SessionDep,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+) -> Any:
+    """Получить всех пользователей (для админа)"""
+    count_statement = select(func.count()).select_from(User)
+    count = session.exec(count_statement).one()
+    statement = select(User).offset(skip).limit(limit)
+    users = session.exec(statement).all()
+    return UsersPublic(data=users, count=count)
+
+
+# NFT эндпоинты
+@router.get("/shop", response_model=list[NFTItemPublic])
+def get_shop_items(session: SessionDep) -> Any:
+    """Получить все доступные NFT в магазине"""
+    items = session.exec(select(NFTItem).where(NFTItem.is_active == True)).all()
+    return items
+
+
+@router.get("/me/nfts", response_model=list[UserNFTPublic])
+def get_user_nfts(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Any:
+    """Получить NFT пользователя"""
+    user_nfts = session.exec(
+        select(UserNFT).where(UserNFT.user_id == current_user.id)
+    ).all()
+
+    result = []
+    for user_nft in user_nfts:
+        item = session.get(NFTItem, user_nft.item_id)
+        if item:
+            result.append(
+                UserNFTPublic(
+                    id=user_nft.id,
+                    item=NFTItemPublic(
+                        id=item.id,
+                        name=item.name,
+                        description=item.description,
+                        image_url=item.image_url,
+                        price=item.price,
+                        rarity=item.rarity,
+                    ),
+                    purchased_at=user_nft.purchased_at,
+                )
+            )
+    return result
+
+
+@router.post("/me/buy", response_model=UserNFTPublic)
+def buy_nft(
+    session: SessionDep,
+    current_user: CurrentUser,
+    buy_data: BuyNFT,
+) -> Any:
+    """Купить NFT"""
+    item = session.get(NFTItem, buy_data.item_id)
+    if not item or not item.is_active:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    if current_user.balance < item.price:
+        raise HTTPException(status_code=400, detail="Not enough shekels")
+
+    existing = session.exec(
+        select(UserNFT).where(
+            UserNFT.user_id == current_user.id, UserNFT.item_id == item.id
+        )
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Already owned")
+
+    current_user.balance -= item.price
+    session.add(current_user)
+
+    user_nft = UserNFT(user_id=current_user.id, item_id=item.id)
+    session.add(user_nft)
+    session.commit()
+    session.refresh(user_nft)
+
+    return UserNFTPublic(
+        id=user_nft.id,
+        item=NFTItemPublic(
+            id=item.id,
+            name=item.name,
+            description=item.description,
+            image_url=item.image_url,
+            price=item.price,
+            rarity=item.rarity,
+        ),
+        purchased_at=user_nft.purchased_at,
+    )
+
+
+@router.get(
+    "/all",
+    dependencies=[Depends(get_current_active_superuser)],
+    response_model=UsersPublic,
+)
+def get_all_users(
+    session: SessionDep,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+) -> Any:
+    """Получить всех пользователей (для админа)"""
+    count_statement = select(func.count()).select_from(User)
+    count = session.exec(count_statement).one()
+    statement = select(User).offset(skip).limit(limit)
+    users = session.exec(statement).all()
+    return UsersPublic(data=users, count=count)
+
+
 @router.get("/{user_id}", response_model=UserPublic)
 def read_user_by_id(
     user_id: int, session: SessionDep, current_user: CurrentUser
@@ -350,6 +512,114 @@ def read_user_by_id(
     user = session.get(User, user_id)
     if user == current_user:
         return user
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=403,
+            detail="The user doesn't have enough privileges",
+        )
+    return user
+
+
+# Admin NFT management
+class CreateNFT(SQLModel):
+    name: str
+    description: str | None = None
+    image_url: str | None = None
+    price: int = Field(ge=0)
+    rarity: str = "common"
+    is_active: bool = True
+
+
+class UpdateNFT(SQLModel):
+    name: str | None = None
+    description: str | None = None
+    image_url: str | None = None
+    price: int | None = Field(default=None, ge=0)
+    rarity: str | None = None
+    is_active: bool | None = None
+
+
+@router.post(
+    "/nft",
+    dependencies=[Depends(get_current_active_superuser)],
+    response_model=NFTItemPublic,
+)
+def create_nft(
+    session: SessionDep,
+    nft_data: CreateNFT,
+) -> Any:
+    """Создать NFT предмет (админ)"""
+    nft = NFTItem(
+        name=nft_data.name,
+        description=nft_data.description,
+        image_url=nft_data.image_url,
+        price=nft_data.price,
+        rarity=nft_data.rarity,
+        is_active=nft_data.is_active,
+    )
+    session.add(nft)
+    session.commit()
+    session.refresh(nft)
+    return nft
+
+
+@router.get(
+    "/nft/{nft_id}",
+    dependencies=[Depends(get_current_active_superuser)],
+    response_model=NFTItemPublic,
+)
+def get_nft(
+    nft_id: int,
+    session: SessionDep,
+) -> Any:
+    """Получить NFT предмет (админ)"""
+    nft = session.get(NFTItem, nft_id)
+    if not nft:
+        raise HTTPException(status_code=404, detail="NFT not found")
+    return nft
+
+
+@router.put(
+    "/nft/{nft_id}",
+    dependencies=[Depends(get_current_active_superuser)],
+    response_model=NFTItemPublic,
+)
+def update_nft(
+    nft_id: int,
+    session: SessionDep,
+    nft_data: UpdateNFT,
+) -> Any:
+    """Обновить NFT предмет (админ)"""
+    nft = session.get(NFTItem, nft_id)
+    if not nft:
+        raise HTTPException(status_code=404, detail="NFT not found")
+
+    update_data = nft_data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(nft, key, value)
+
+    session.add(nft)
+    session.commit()
+    session.refresh(nft)
+    return nft
+
+
+@router.delete(
+    "/nft/{nft_id}",
+    dependencies=[Depends(get_current_active_superuser)],
+)
+def delete_nft(
+    nft_id: int,
+    session: SessionDep,
+) -> Message:
+    """Удалить NFT предмет (админ)"""
+    nft = session.get(NFTItem, nft_id)
+    if not nft:
+        raise HTTPException(status_code=404, detail="NFT not found")
+
+    session.delete(nft)
+    session.commit()
+    return Message(message="NFT deleted successfully")
     if not current_user.is_superuser:
         raise HTTPException(
             status_code=403,
@@ -457,8 +727,8 @@ def unban_user(
 )
 def get_all_users(
     session: SessionDep,
-    skip: int = 0,
-    limit: int = 100,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> Any:
     """Получить всех пользователей (для админа)"""
     count_statement = select(func.count()).select_from(User)
@@ -622,3 +892,53 @@ def admin_add_balance(
     session.refresh(user)
 
     return user
+
+
+@router.post("/{user_id}/verify", dependencies=[Depends(get_current_active_superuser)])
+def verify_user(
+    user_id: int,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Any:
+    """Верифицировать пользователя (админ)"""
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.is_verified = True
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+
+    return {
+        "id": user.id,
+        "email": user.email,
+        "full_name": user.full_name,
+        "is_verified": user.is_verified,
+    }
+
+
+@router.post(
+    "/{user_id}/unverify", dependencies=[Depends(get_current_active_superuser)]
+)
+def unverify_user(
+    user_id: int,
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Any:
+    """Убрать верификацию пользователя (админ)"""
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.is_verified = False
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+
+    return {
+        "id": user.id,
+        "email": user.email,
+        "full_name": user.full_name,
+        "is_verified": user.is_verified,
+    }
