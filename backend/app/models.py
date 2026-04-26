@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from typing import Literal
 
 from pydantic import EmailStr
 from sqlmodel import Column, DateTime, Field, Integer, Relationship, SQLModel, func
@@ -52,6 +51,8 @@ class User(UserBase, table=True):
     ban_reason: str | None = Field(default=None, max_length=500)
     timezone: str = Field(default="UTC", max_length=50)
     last_seen: datetime | None = Field(default=None)
+    last_seen_at: datetime | None = Field(default=None)
+    is_online: bool = Field(default=False)
     is_ultra: bool = Field(default=False)  # Подписка Ultra
     ultra_expires_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime, nullable=True)

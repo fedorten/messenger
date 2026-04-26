@@ -1,22 +1,20 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from app.api.deps import CurrentUser, SessionDep
 from app.bot_executor import execute_bot
 from app.models import (
+    BotExecutionResult,
+    Chat,
     ChatBot,
     ChatBotCreate,
     ChatBotPublic,
     ChatBotUpdate,
-    BotExecutionResult,
-    User,
-    Chat,
     ChatMember,
 )
-from app.gigachat_client import gigachat_client
 
 logger = logging.getLogger(__name__)
 
@@ -32,24 +30,30 @@ def get_my_bots(session: SessionDep, current_user: CurrentUser) -> list[ChatBot]
 
 
 @router.get("/all")
-def get_all_bots(session: SessionDep) -> list[ChatBotPublic]:
-    """Get all public bots"""
-    statement = select(ChatBot).where(ChatBot.is_active == True)
+def get_all_bots(
+    session: SessionDep, current_user: CurrentUser
+) -> list[ChatBotPublic]:
+    """Get all public bots plus the current user's private bots"""
+    statement = select(ChatBot).where(
+        ChatBot.is_active,
+        (ChatBot.is_public) | (ChatBot.owner_id == current_user.id),
+    )
     bots = session.exec(statement).all()
     return bots
 
 
 @router.get("/search")
-def search_bots(session: SessionDep, q: str = "") -> list[ChatBotPublic]:
-    """Search all bots by name (returns public bots and user's own bots)"""
+def search_bots(
+    session: SessionDep, current_user: CurrentUser, q: str = ""
+) -> list[ChatBotPublic]:
+    """Search public bots and the current user's private bots by name"""
     if not q.strip():
         return []
-    from app.api.deps import get_current_user
 
-    # For now return all active bots matching query
-    # In production you'd filter by owner_id for private bots
     statement = select(ChatBot).where(
-        ChatBot.name.ilike(f"%{q}%"), ChatBot.is_active == True
+        ChatBot.name.ilike(f"%{q}%"),
+        ChatBot.is_active,
+        (ChatBot.is_public) | (ChatBot.owner_id == current_user.id),
     )
     bots = session.exec(statement).all()
     return bots

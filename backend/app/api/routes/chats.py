@@ -6,6 +6,7 @@ from sqlmodel import select
 from app import crud
 from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.season_helpers import update_user_task_progress
+from app.api.serialization import build_user_public, compute_message_is_read
 from app.models import (
     Chat,
     ChatAddMembers,
@@ -22,7 +23,6 @@ from app.models import (
     ChatsPublic,
     Message,
     User,
-    UserPublic,
 )
 
 router = APIRouter(prefix="/chats", tags=["chats"])
@@ -64,26 +64,7 @@ def _format_chat_public(
                     id=member.id,
                     user_id=member.user_id,
                     role=member.role,
-                    user=UserPublic(
-                        id=user.id,
-                        email=user.email,
-                        full_name=user.full_name,
-                        avatar_url=user.avatar_url,
-                        is_active=user.is_active,
-                        is_superuser=user.is_superuser,
-                        balance=user.balance,
-                        is_banned=user.is_banned,
-                        ban_reason=user.ban_reason,
-                        timezone=user.timezone,
-                        last_seen=user.last_seen,
-                        is_online=False,
-                        is_ultra=getattr(user, "is_ultra", False),
-                        ultra_expires_at=getattr(user, "ultra_expires_at", None),
-                        ultra_badge=getattr(user, "ultra_badge", None),
-                        ultra_profile_color=getattr(user, "ultra_profile_color", None),
-                        ultra_avatar_style=getattr(user, "ultra_avatar_style", None),
-                        is_verified=getattr(user, "is_verified", False),
-                    ),
+                    user=build_user_public(user),
                     joined_at=member.joined_at,
                     last_read_at=member.last_read_at,
                 )
@@ -94,26 +75,7 @@ def _format_chat_public(
     if last_message:
         sender_user = session.get(User, last_message.sender_id)
         if sender_user:
-            last_message_sender = UserPublic(
-                id=sender_user.id,
-                email=sender_user.email,
-                full_name=sender_user.full_name,
-                avatar_url=sender_user.avatar_url,
-                is_active=sender_user.is_active,
-                is_superuser=sender_user.is_superuser,
-                balance=sender_user.balance,
-                is_banned=sender_user.is_banned,
-                ban_reason=sender_user.ban_reason,
-                timezone=sender_user.timezone,
-                last_seen=sender_user.last_seen,
-                is_online=False,
-                is_ultra=getattr(sender_user, "is_ultra", False),
-                ultra_expires_at=getattr(sender_user, "ultra_expires_at", None),
-                ultra_badge=getattr(sender_user, "ultra_badge", None),
-                ultra_profile_color=getattr(sender_user, "ultra_profile_color", None),
-                ultra_avatar_style=getattr(sender_user, "ultra_avatar_style", None),
-                is_verified=getattr(sender_user, "is_verified", False),
-            )
+            last_message_sender = build_user_public(sender_user)
 
     # Get bot info for bot chats
     bot_data = None
@@ -148,6 +110,11 @@ def _format_chat_public(
                 sender_id=last_message.sender_id,
                 sender=last_message_sender,
                 content=last_message.content,
+                media_type=last_message.media_type,
+                media_filename=last_message.media_filename,
+                media_url=last_message.media_url,
+                media_size=last_message.media_size,
+                is_read=compute_message_is_read(session, chat, last_message, current_user_id),
                 created_at=last_message.created_at,
                 edited_at=last_message.edited_at,
             )
@@ -207,33 +174,38 @@ def create_group_chat(
     chat_in: ChatCreate, session: SessionDep, current_user: CurrentUser
 ) -> Any:
     """Создать групповой чат"""
-    if chat_in.chat_type != "group":
-        raise HTTPException(
-            status_code=400, detail="Use /private/{user_id} for private chats"
-        )
+    if chat_in.chat_type not in ("group", "channel"):
+        raise HTTPException(status_code=400, detail="Invalid chat type")
 
     if not chat_in.name:
-        raise HTTPException(status_code=400, detail="Group chat name is required")
+        raise HTTPException(status_code=400, detail="Chat name is required")
 
-    if not chat_in.member_ids:
-        raise HTTPException(status_code=400, detail="At least one member is required")
+    if chat_in.chat_type == "group":
+        if not chat_in.member_ids:
+            raise HTTPException(status_code=400, detail="At least one member is required")
 
-    # Проверяем, что все пользователи существуют
-    for user_id in chat_in.member_ids:
-        user = session.get(User, user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+        # Проверяем, что все пользователи существуют
+        for user_id in chat_in.member_ids:
+            user = session.get(User, user_id)
+            if not user:
+                raise HTTPException(status_code=404, detail=f"User {user_id} not found")
 
-    chat = crud.create_group_chat(
-        session=session,
-        creator_id=current_user.id,
-        name=chat_in.name,
-        member_ids=chat_in.member_ids,
-    )
+        chat = crud.create_group_chat(
+            session=session,
+            creator_id=current_user.id,
+            name=chat_in.name,
+            member_ids=chat_in.member_ids,
+        )
+    else:
+        chat = crud.create_channel(
+            session=session,
+            creator_id=current_user.id,
+            name=chat_in.name,
+        )
 
     try:
         update_user_task_progress(session, current_user.id, "chats")
-    except:
+    except Exception:
         pass
 
     return _format_chat_public(chat, current_user.id, session)
@@ -314,26 +286,7 @@ def get_messages(
     for msg in messages:
         sender = session.get(User, msg.sender_id)
         if sender:
-            sender_public = UserPublic(
-                id=sender.id,
-                email=sender.email,
-                full_name=sender.full_name,
-                avatar_url=sender.avatar_url,
-                is_active=sender.is_active,
-                is_superuser=sender.is_superuser,
-                balance=sender.balance,
-                is_banned=sender.is_banned,
-                ban_reason=sender.ban_reason,
-                timezone=sender.timezone,
-                last_seen=sender.last_seen,
-                is_online=False,
-                is_ultra=getattr(sender, "is_ultra", False),
-                ultra_expires_at=getattr(sender, "ultra_expires_at", None),
-                ultra_badge=getattr(sender, "ultra_badge", None),
-                ultra_profile_color=getattr(sender, "ultra_profile_color", None),
-                ultra_avatar_style=getattr(sender, "ultra_avatar_style", None),
-                is_verified=getattr(sender, "is_verified", False),
-            )
+            sender_public = build_user_public(sender)
         else:
             sender_public = None
         messages_public.append(
@@ -347,6 +300,7 @@ def get_messages(
                 media_filename=msg.media_filename,
                 media_url=msg.media_url,
                 media_size=msg.media_size,
+                is_read=compute_message_is_read(session, chat, msg, current_user.id),
                 created_at=msg.created_at,
                 edited_at=msg.edited_at,
             )
@@ -388,14 +342,7 @@ def update_member_role(
 
     user = session.get(User, member.user_id)
     if user:
-        user_public = UserPublic(
-            id=user.id,
-            email=user.email,
-            full_name=user.full_name,
-            avatar_url=user.avatar_url,
-            is_active=user.is_active,
-            is_superuser=user.is_superuser,
-        )
+        user_public = build_user_public(user)
     else:
         user_public = None
 

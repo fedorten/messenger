@@ -2,25 +2,30 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from sqlmodel import func, select
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep
-from app.api.routes.websocket import manager
 from app.api.routes.season_helpers import update_user_task_progress
+from app.api.routes.websocket import manager
+from app.api.serialization import (
+    build_user_public,
+    compute_message_is_read,
+    get_chat_member,
+)
 from app.gigachat_client import gigachat_client
 from app.models import (
+    BotExecutionResult,
+    Chat,
     ChatMessage,
     ChatMessageCreate,
     ChatMessagePublic,
     ChatMessageUpdate,
     Message,
     User,
-    UserPublic,
-    BotExecutionResult,
 )
-
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 logger = logging.getLogger(__name__)
@@ -39,7 +44,7 @@ async def broadcast_message_to_chat(message_public: ChatMessagePublic, chat_id: 
             },
             chat_id,
         )
-        logger.info(f"Message broadcasted successfully")
+        logger.info("Message broadcasted successfully")
     except Exception as e:
         logger.error(f"Error broadcasting message: {e}")
 
@@ -66,29 +71,15 @@ async def create_message(
             chat_id=chat_id,
             sender_id=current_user.id,
             content=message_in.content,
+            media_type=message_in.media_type,
+            media_filename=message_in.media_filename,
+            media_url=message_in.media_url,
+            media_size=message_in.media_size,
         )
 
         sender = session.get(User, message.sender_id)
         if sender:
-            sender_public = UserPublic(
-                id=sender.id,
-                email=sender.email,
-                full_name=sender.full_name,
-                avatar_url=sender.avatar_url,
-                is_active=sender.is_active,
-                is_superuser=sender.is_superuser,
-                balance=sender.balance,
-                is_banned=sender.is_banned,
-                ban_reason=sender.ban_reason,
-                timezone=sender.timezone,
-                last_seen=sender.last_seen,
-                is_ultra=sender.is_ultra,
-                ultra_expires_at=sender.ultra_expires_at,
-                ultra_badge=sender.ultra_badge,
-                ultra_profile_color=getattr(sender, "ultra_profile_color", None),
-                ultra_avatar_style=getattr(sender, "ultra_avatar_style", None),
-                is_verified=getattr(sender, "is_verified", False),
-            )
+            sender_public = build_user_public(sender)
         else:
             sender_public = None
 
@@ -98,6 +89,11 @@ async def create_message(
             sender_id=message.sender_id,
             sender=sender_public,
             content=message.content,
+            media_type=message.media_type,
+            media_filename=message.media_filename,
+            media_url=message.media_url,
+            media_size=message.media_size,
+            is_read=compute_message_is_read(session, chat, message, current_user.id),
             created_at=message.created_at,
             edited_at=message.edited_at,
         )
@@ -136,6 +132,13 @@ async def create_message(
                     sender_id=0,
                     sender=None,
                     content=bot_response.content,
+                    media_type=bot_response.media_type,
+                    media_filename=bot_response.media_filename,
+                    media_url=bot_response.media_url,
+                    media_size=bot_response.media_size,
+                    is_read=compute_message_is_read(
+                        session, chat, bot_response, current_user.id
+                    ),
                     created_at=bot_response.created_at,
                     edited_at=bot_response.edited_at,
                 )
@@ -176,25 +179,7 @@ def update_message(
 
     sender = session.get(User, message.sender_id)
     if sender:
-        sender_public = UserPublic(
-            id=sender.id,
-            email=sender.email,
-            full_name=sender.full_name,
-            avatar_url=sender.avatar_url,
-            is_active=sender.is_active,
-            is_superuser=sender.is_superuser,
-            balance=sender.balance,
-            is_banned=sender.is_banned,
-            ban_reason=sender.ban_reason,
-            timezone=sender.timezone,
-            last_seen=sender.last_seen,
-            is_ultra=sender.is_ultra,
-            ultra_expires_at=sender.ultra_expires_at,
-            ultra_badge=sender.ultra_badge,
-            ultra_profile_color=getattr(sender, "ultra_profile_color", None),
-            ultra_avatar_style=getattr(sender, "ultra_avatar_style", None),
-            is_verified=getattr(sender, "is_verified", False),
-        )
+        sender_public = build_user_public(sender)
     else:
         sender_public = None
 
@@ -204,6 +189,15 @@ def update_message(
         sender_id=message.sender_id,
         sender=sender_public,
         content=message.content,
+        media_type=message.media_type,
+        media_filename=message.media_filename,
+        media_url=message.media_url,
+        media_size=message.media_size,
+        is_read=compute_message_is_read(
+            session, session.get(Chat, message.chat_id), message, current_user.id
+        )
+        if message.chat_id
+        else False,
         created_at=message.created_at,
         edited_at=message.edited_at,
     )
@@ -238,27 +232,31 @@ async def mark_messages_as_read(
     current_user: CurrentUser,
 ) -> Any:
     """Отметить сообщения как прочитанные"""
-    from sqlmodel import select
-    from app.models import ChatMessage
+    from datetime import datetime, timezone
 
     chat = crud.get_chat(session=session, chat_id=chat_id, user_id=current_user.id)
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
 
-    messages = session.exec(
-        select(ChatMessage).where(
-            ChatMessage.chat_id == chat_id,
-            ChatMessage.sender_id != current_user.id,
-            ChatMessage.is_read == False,
-        )
-    ).all()
+    current_member = get_chat_member(session, chat_id, current_user.id)
+    if not current_member:
+        return {"status": "ok", "count": 0}
 
-    for message in messages:
-        message.is_read = True
-        session.add(message)
+    unread_statement = select(func.count()).select_from(ChatMessage).where(
+        ChatMessage.chat_id == chat_id,
+        ChatMessage.sender_id != current_user.id,
+    )
+    if current_member.last_read_at is not None:
+        unread_statement = unread_statement.where(
+            ChatMessage.created_at > current_member.last_read_at
+        )
+    unread_count = session.exec(unread_statement).one()
+
+    current_member.last_read_at = datetime.now(timezone.utc)
+    session.add(current_member)
     session.commit()
 
-    return {"status": "ok", "count": len(messages)}
+    return {"status": "ok", "count": unread_count}
 
 
 class AIChatRequest(BaseModel):
@@ -268,8 +266,8 @@ class AIChatRequest(BaseModel):
 @router.post("/ai/chat")
 async def chat_with_ai(
     request: AIChatRequest,
-    session: SessionDep,
-    current_user: CurrentUser,
+    _session: SessionDep,
+    _current_user: CurrentUser,
 ) -> BotExecutionResult:
     """Отправить сообщение GigaChat AI"""
     response = gigachat_client.chat(request.message)

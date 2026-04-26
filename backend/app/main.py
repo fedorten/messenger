@@ -1,21 +1,20 @@
 import logging
-import os
+
 import sentry_sdk
 from fastapi import FastAPI
-from fastapi.routing import APIRoute
-from fastapi.staticfiles import StaticFiles
-from starlette.middleware.cors import CORSMiddleware
-from sqlmodel import Session, SQLModel, select
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from sqlmodel import Session, SQLModel, select
+from starlette.middleware.cors import CORSMiddleware
 
 from app import crud
 from app.api.main import api_router
 from app.core.config import settings
-from app.core.db import engine
-from app.models import User, UserCreate, NFTItem
+from app.core.db import engine, ensure_sqlite_schema_compatibility
+from app.models import NFTItem, User, UserCreate
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,6 +38,7 @@ def create_tables():
         logger.info("Checking and creating database tables if needed...")
         # SQLModel.create_all безопасно создает только отсутствующие таблицы
         SQLModel.metadata.create_all(engine)
+        ensure_sqlite_schema_compatibility()
         logger.info("Database tables ready")
     except Exception as e:
         logger.error(f"Error creating tables: {e}")
@@ -149,7 +149,7 @@ app.state.limiter = limiter
 
 
 @app.exception_handler(RateLimitExceeded)
-async def rate_limit_handler(request, exc):
+async def rate_limit_handler(_request, _exc):
     return JSONResponse(
         status_code=429,
         content={"detail": "Rate limit exceeded. Please try again later."},

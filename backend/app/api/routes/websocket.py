@@ -1,13 +1,13 @@
 import json
-from typing import Dict, Set
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app import crud
-from app.core.security import decode_access_token
+from app.api.serialization import build_user_public, compute_message_is_read
 from app.core.db import engine
-from app.models import ChatMessage, ChatMessagePublic, User, UserPublic
+from app.core.security import decode_access_token
+from app.models import Chat, ChatMember, ChatMessagePublic, User
 
 router = APIRouter()
 
@@ -16,11 +16,11 @@ router = APIRouter()
 class ConnectionManager:
     def __init__(self):
         # chat_id -> set of websockets
-        self.active_connections: Dict[int, Set[WebSocket]] = {}
+        self.active_connections: dict[int, set[WebSocket]] = {}
         # user_id -> set of websockets
-        self.user_connections: Dict[int, Set[WebSocket]] = {}
+        self.user_connections: dict[int, set[WebSocket]] = {}
         # user_id -> set of user_ids who are typing in each chat
-        self.typing_users: Dict[int, Set[int]] = {}
+        self.typing_users: dict[int, set[int]] = {}
 
     async def connect(self, websocket: WebSocket, chat_id: int, user_id: int):
         await websocket.accept()
@@ -46,7 +46,7 @@ class ConnectionManager:
             await self.broadcast_to_chat(
                 {"type": "user_online", "user_id": user_id},
                 chat_id,
-                exclude_user=user_id,
+                _exclude_user=user_id,
             )
             # Также уведомляем всех в глобальном чате (chat_id=0)
             for conn in self.active_connections.get(0, set()):
@@ -84,7 +84,7 @@ class ConnectionManager:
         await websocket.send_json(message)
 
     async def broadcast_to_chat(
-        self, message: dict, chat_id: int, exclude_user: int = None
+        self, message: dict, chat_id: int, _exclude_user: int = None
     ):
         import logging
 
@@ -124,7 +124,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-async def get_user_from_websocket(websocket: WebSocket, token: str) -> User | None:
+async def get_user_from_websocket(_websocket: WebSocket, token: str) -> User | None:
     """Получить пользователя из токена WebSocket"""
     try:
         payload = decode_access_token(token)
@@ -164,9 +164,6 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
     # Проверяем, что пользователь является участником чата
     if chat_id != 0:
         with Session(engine) as session:
-            from sqlmodel import select
-            from app.models import Chat, ChatMember
-
             # Сначала получаем чат чтобы узнать его тип
             chat = session.get(Chat, chat_id)
 
@@ -195,6 +192,7 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
                 # Создаем сообщение
                 with Session(engine) as session:
                     try:
+                        chat = session.get(Chat, chat_id)
                         message = crud.create_message(
                             session=session,
                             chat_id=chat_id,
@@ -208,13 +206,8 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
 
                         sender = session.get(User, message.sender_id)
                         if sender:
-                            sender_public = UserPublic(
-                                id=sender.id,
-                                email=sender.email,
-                                full_name=sender.full_name,
-                                avatar_url=sender.avatar_url,
-                                is_active=sender.is_active,
-                                is_superuser=sender.is_superuser,
+                            sender_public = build_user_public(
+                                sender, is_online=sender.is_online
                             )
                         else:
                             sender_public = None
@@ -229,6 +222,9 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
                             media_filename=message.media_filename,
                             media_url=message.media_url,
                             media_size=message.media_size,
+                            is_read=compute_message_is_read(session, chat, message, user.id)
+                            if chat
+                            else False,
                             created_at=message.created_at,
                             edited_at=message.edited_at,
                         )
@@ -243,12 +239,6 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
                             chat_id,
                         )
 
-                        # Handle bot response for bot chats
-                        from app.models import Chat
-                        from sqlmodel import select
-
-                        chat_stmt = select(Chat).where(Chat.id == chat_id)
-                        chat = session.exec(chat_stmt).first()
                         if chat and chat.chat_type == "bot" and chat.bot_id:
                             from app.bot_executor import execute_bot
                             from app.models import ChatBot
@@ -278,6 +268,15 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
                                     sender_id=0,
                                     sender=None,
                                     content=bot_msg.content,
+                                    media_type=bot_msg.media_type,
+                                    media_filename=bot_msg.media_filename,
+                                    media_url=bot_msg.media_url,
+                                    media_size=bot_msg.media_size,
+                                    is_read=compute_message_is_read(
+                                        session, chat, bot_msg, user.id
+                                    )
+                                    if chat
+                                    else False,
                                     created_at=bot_msg.created_at,
                                     edited_at=bot_msg.edited_at,
                                 )
@@ -370,4 +369,4 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
                     )
 
     except WebSocketDisconnect:
-        manager.disconnect(websocket, chat_id, user.id)
+        await manager.disconnect(websocket, chat_id, user.id)

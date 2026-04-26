@@ -5,10 +5,8 @@ from sqlmodel import Session, func, or_, select
 from app.core.security import get_password_hash, verify_password
 from app.models import (
     Chat,
-    ChatCreate,
     ChatMember,
     ChatMessage,
-    ChatMessageCreate,
     User,
     UserCreate,
     UserUpdate,
@@ -66,7 +64,7 @@ def search_users(
         select(User)
         .where(or_(User.email.ilike(search_term), User.full_name.ilike(search_term)))
         .where(User.id != current_user_id)
-        .where(User.is_active == True)
+        .where(User.is_active)
         .limit(limit)
     )
     return list(session.exec(statement).all())
@@ -158,7 +156,7 @@ def create_group_chat(
 
 
 def create_channel(
-    *, session: Session, creator_id: int, name: str, description: str | None = None
+    *, session: Session, creator_id: int, name: str, _description: str | None = None
 ) -> Chat:
     """Создать канал (только админ может создавать и постить)"""
     new_chat = Chat(chat_type="channel", name=name)
@@ -179,12 +177,13 @@ def update_user_online_status(
 ) -> None:
     """Обновить статус онлайн пользователя"""
     from datetime import datetime, timezone
-    
+
     user = session.get(User, user_id)
     if user:
         user.is_online = is_online
-        if not is_online:
-            user.last_seen_at = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        user.last_seen_at = now
+        user.last_seen = now
         session.add(user)
         session.commit()
 

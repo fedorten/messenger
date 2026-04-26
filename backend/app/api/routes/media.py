@@ -10,21 +10,19 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from sqlmodel import Session, func, select
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.websocket import manager
-from app.api.routes.season_helpers import update_user_task_progress
+from app.api.serialization import build_user_public, compute_message_is_read
 from app.core.config import settings
 from app.models import (
     ChatMessage,
-    ChatMessagePublic,
     ChatMessageCreate,
+    ChatMessagePublic,
     ChatMessageUpdate,
     Message,
     User,
-    UserPublic,
 )
 
 router = APIRouter(prefix="/media", tags=["media"])
@@ -126,21 +124,17 @@ def validate_file_content(file_path: Path, content_type: str) -> bool:
         if content_type in ALLOWED_IMAGE_TYPES:
             # Для изображений - мягкая проверка, не отклоняем если magic bytes не найдены
             # Многие современные PNG/JPG имеют особенности сжатия
-            logger.warning(
-                f"Image declared, magic bytes not found - allowing (soft check)"
-            )
+            logger.warning("Image declared, magic bytes not found - allowing (soft check)")
             return True
 
         if content_type in ALLOWED_AUDIO_TYPES:
             # Для аудио - мягкая проверка
-            logger.warning(
-                f"Audio declared, magic bytes not found - allowing (soft check)"
-            )
+            logger.warning("Audio declared, magic bytes not found - allowing (soft check)")
             return True
 
         if content_type in ALLOWED_DOCUMENT_TYPES:
             if not _validate_document_content(header, content_type):
-                logger.warning(f"Document declared but content doesn't match")
+                logger.warning("Document declared but content doesn't match")
                 return False
             return True
 
@@ -181,7 +175,7 @@ def get_storage_size() -> int:
     media_dir = get_media_dir()
     total_size = 0
     if media_dir.exists():
-        for dirpath, dirnames, filenames in os.walk(media_dir):
+        for dirpath, _dirnames, filenames in os.walk(media_dir):
             for f in filenames:
                 fp = os.path.join(dirpath, f)
                 if os.path.exists(fp):
@@ -211,9 +205,7 @@ def cleanup_old_files(limit_bytes: int = None) -> int:
 
     freed_bytes = 0
     current_size = get_storage_size()
-    target_reduction = current_size - limit_bytes + (100 * 1024 * 1024)
-
-    for mtime, file_path in files_with_time:
+    for _mtime, file_path in files_with_time:
         if current_size - freed_bytes <= limit_bytes:
             break
         try:
@@ -239,7 +231,7 @@ async def broadcast_message_to_chat(message_public: ChatMessagePublic, chat_id: 
             },
             chat_id,
         )
-        logger.info(f"Message broadcasted successfully")
+        logger.info("Message broadcasted successfully")
     except Exception as e:
         logger.error(f"Error broadcasting message: {e}")
 
@@ -260,10 +252,11 @@ def determine_media_type(content_type: str) -> str | None:
 async def upload_media(
     request: Request,
     file: UploadFile,
-    session: SessionDep,
+    _session: SessionDep,
     current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Загрузить медиа файл"""
+    _ = request
     if file.size and file.size > settings.MEDIA_MAX_SIZE:
         raise HTTPException(
             status_code=400,
@@ -327,8 +320,8 @@ async def upload_media(
 @router.get("/files/{filename}")
 async def serve_media_file(
     filename: str,
-    session: SessionDep,
-    current_user: User = None,
+    _session: SessionDep,
+    _current_user: User = None,
 ):
     """Служить медиа файлы (без авторизации для публичного доступа)"""
     safe_filename = validate_filename(filename)
@@ -436,6 +429,7 @@ async def create_message(
     current_user: CurrentUser,
 ) -> Any:
     """Создать сообщение в чате (текстовое или с медиа)"""
+    _ = request
     if message_in.content and len(message_in.content) > MAX_MESSAGE_CONTENT_LENGTH:
         raise HTTPException(
             status_code=400,
@@ -460,14 +454,7 @@ async def create_message(
 
         sender = session.get(User, message.sender_id)
         if sender:
-            sender_public = UserPublic(
-                id=sender.id,
-                email=sender.email,
-                full_name=sender.full_name,
-                avatar_url=sender.avatar_url,
-                is_active=sender.is_active,
-                is_superuser=sender.is_superuser,
-            )
+            sender_public = build_user_public(sender)
         else:
             sender_public = None
 
@@ -481,6 +468,7 @@ async def create_message(
             media_filename=message.media_filename,
             media_url=message.media_url,
             media_size=message.media_size,
+            is_read=compute_message_is_read(session, chat, message, current_user.id),
             created_at=message.created_at,
             edited_at=message.edited_at,
         )
@@ -513,16 +501,18 @@ def update_message(
         )
 
     sender = session.get(User, message.sender_id)
+    chat = crud.get_chat(session=session, chat_id=message.chat_id, user_id=current_user.id)
     return ChatMessagePublic(
         id=message.id,
         chat_id=message.chat_id,
         sender_id=message.sender_id,
-        sender=UserPublic.model_validate(sender) if sender else None,
+        sender=build_user_public(sender) if sender else None,
         content=message.content,
         media_type=message.media_type,
         media_filename=message.media_filename,
         media_url=message.media_url,
         media_size=message.media_size,
+        is_read=compute_message_is_read(session, chat, message, current_user.id) if chat else False,
         created_at=message.created_at,
         edited_at=message.edited_at,
     )

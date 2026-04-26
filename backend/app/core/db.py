@@ -1,16 +1,9 @@
+from sqlalchemy import event, inspect, text
 from sqlmodel import Session, create_engine, select
-from sqlalchemy import event
-from sqlalchemy.dialects.sqlite import BLOB
 
 from app import crud
 from app.core.config import settings
-from app.models import (
-    Chat,
-    ChatMember,
-    ChatMessage,
-    User,
-    UserCreate,
-)  # Импортируем все модели для регистрации в метаданных
+from app.models import User, UserCreate
 
 # SQLite требует connect_args для работы в многопоточном режиме
 connect_args = {}
@@ -27,7 +20,7 @@ engine = create_engine(
 if settings.SQLALCHEMY_DATABASE_URI.startswith("sqlite"):
 
     @event.listens_for(engine, "connect")
-    def set_sqlite_pragma(dbapi_conn, connection_record):
+    def set_sqlite_pragma(dbapi_conn, _connection_record):
         cursor = dbapi_conn.cursor()
         # Включаем поддержку внешних ключей
         cursor.execute("PRAGMA foreign_keys=ON")
@@ -48,6 +41,7 @@ def init_db(session: Session) -> None:
     # This works because the models are already imported and registered from app.models
     # Создаем таблицы для тестов (в продакшене используются миграции Alembic)
     SQLModel.metadata.create_all(engine)
+    ensure_sqlite_schema_compatibility()
 
     user = session.exec(
         select(User).where(User.email == settings.FIRST_SUPERUSER)
@@ -59,3 +53,39 @@ def init_db(session: Session) -> None:
             is_superuser=True,
         )
         user = crud.create_user(session=session, user_create=user_in)
+
+
+def ensure_sqlite_schema_compatibility() -> None:
+    """Добавить недостающие колонки в SQLite-базе для старых схем."""
+    if not settings.SQLALCHEMY_DATABASE_URI.startswith("sqlite"):
+        return
+
+    expected_columns = {
+        "user": {
+            "is_online": "BOOLEAN DEFAULT 0",
+            "last_seen_at": "DATETIME",
+            "timezone": "VARCHAR(50) DEFAULT 'UTC'",
+        },
+        "chat": {
+            "avatar_url": "VARCHAR(500)",
+        },
+    }
+
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        existing_tables = set(inspector.get_table_names())
+        for table_name, columns in expected_columns.items():
+            if table_name not in existing_tables:
+                continue
+
+            existing_columns = {
+                column_info["name"] for column_info in inspector.get_columns(table_name)
+            }
+            for column_name, column_ddl in columns.items():
+                if column_name in existing_columns:
+                    continue
+                connection.execute(
+                    text(
+                        f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {column_ddl}'
+                    )
+                )

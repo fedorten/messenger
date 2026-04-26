@@ -99,10 +99,10 @@
         </div>
         <div v-else class="chats-list">
           <div
-            v-for="chat in chats.filter(c => c.chat_type !== 'bot')"
+            v-for="chat in chats"
             :key="chat.id"
             class="chat-item"
-            :class="{ 'group-chat': chat.chat_type === 'group' }"
+            :class="{ 'group-chat': chat.chat_type === 'group', 'bot-chat': chat.chat_type === 'bot' }"
             @click="openChat(chat.id)"
           >
             <div class="avatar-wrapper">
@@ -1416,4 +1416,3 @@ h2 {
   cursor: pointer;
 }
 </style>
-
