@@ -17,6 +17,7 @@ from app.api.routes.websocket import manager
 from app.api.serialization import build_user_public, compute_message_is_read
 from app.core.config import settings
 from app.models import (
+    ChatBot,
     ChatMessage,
     ChatMessageCreate,
     ChatMessagePublic,
@@ -474,6 +475,46 @@ async def create_message(
         )
 
         asyncio.create_task(broadcast_message_to_chat(message_public, chat_id))
+
+        if chat.chat_type == "bot" and chat.bot_id:
+            from app.bot_executor import execute_bot
+
+            bot = session.get(ChatBot, chat.bot_id)
+            if bot and bot.is_active:
+                result = execute_bot(
+                    bot.code,
+                    bot.language,
+                    message_in.content,
+                    {
+                        "id": current_user.id,
+                        "full_name": current_user.full_name or current_user.email,
+                    },
+                )
+                bot_response = crud.create_message(
+                    session=session,
+                    chat_id=chat_id,
+                    sender_id=0,
+                    content=(result.get("response") or "Бот не вернул ответ").strip()[:4096],
+                    media_type=result.get("media_type"),
+                    media_url=result.get("media_url"),
+                )
+                bot_message_public = ChatMessagePublic(
+                    id=bot_response.id,
+                    chat_id=bot_response.chat_id,
+                    sender_id=0,
+                    sender=None,
+                    content=bot_response.content,
+                    media_type=bot_response.media_type,
+                    media_filename=bot_response.media_filename,
+                    media_url=bot_response.media_url,
+                    media_size=bot_response.media_size,
+                    is_read=compute_message_is_read(
+                        session, chat, bot_response, current_user.id
+                    ),
+                    created_at=bot_response.created_at,
+                    edited_at=bot_response.edited_at,
+                )
+                asyncio.create_task(broadcast_message_to_chat(bot_message_public, chat_id))
 
         return message_public
     except ValueError as e:

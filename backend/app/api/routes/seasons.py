@@ -1,21 +1,20 @@
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any, Annotated
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlmodel import Field, Session, SQLModel, func, select
+from sqlmodel import Field, Session, select
 
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
+from app.api.serialization import sync_user_ultra_status
 from app.models import (
-    User,
-    Season,
-    SeasonTask,
-    UserSeasonProgress,
-    SeasonPublic,
-    SeasonTaskPublic,
-    UserSeasonProgressPublic,
     Message,
+    Season,
+    SeasonPublic,
+    SeasonTask,
+    SeasonTaskPublic,
+    UserSeasonProgress,
 )
 
 router = APIRouter(prefix="/seasons", tags=["seasons"])
@@ -59,7 +58,7 @@ def get_seasons(session: SessionDep) -> Any:
 @router.get("/active", response_model=SeasonPublic | None)
 def get_active_season(session: SessionDep) -> Any:
     """Получить активный сезон"""
-    season = session.exec(select(Season).where(Season.is_active == True)).first()
+    season = session.exec(select(Season).where(Season.is_active)).first()
     return season
 
 
@@ -137,7 +136,7 @@ def get_my_progress(
     current_user: CurrentUser,
 ) -> Any:
     """Получить прогресс текущего сезона"""
-    season = session.exec(select(Season).where(Season.is_active == True)).first()
+    season = session.exec(select(Season).where(Season.is_active)).first()
     if not season:
         return None
 
@@ -186,7 +185,7 @@ def claim_task(
     if not task_id:
         raise HTTPException(status_code=400, detail="task_id required")
 
-    season = session.exec(select(Season).where(Season.is_active == True)).first()
+    season = session.exec(select(Season).where(Season.is_active)).first()
     if not season:
         raise HTTPException(status_code=400, detail="No active season")
 
@@ -248,6 +247,7 @@ def claim_task(
 
     # Даём 2 часа Ultra за выполнение задания
     now = datetime.now(timezone.utc)
+    sync_user_ultra_status(current_user)
     if (
         current_user.is_ultra
         and current_user.ultra_expires_at
@@ -281,7 +281,7 @@ def claim_task(
 
 def update_user_task_progress(session: Session, user_id: int, task_type: str):
     """Обновить прогресс пользователя по типу задания"""
-    season = session.exec(select(Season).where(Season.is_active == True)).first()
+    season = session.exec(select(Season).where(Season.is_active)).first()
     if not season:
         return
 
@@ -385,7 +385,7 @@ def start_season(
     if not season:
         raise HTTPException(status_code=404, detail="Season not found")
 
-    active_season = session.exec(select(Season).where(Season.is_active == True)).first()
+    active_season = session.exec(select(Season).where(Season.is_active)).first()
     if active_season:
         active_season.is_active = False
         session.add(active_season)
@@ -405,7 +405,7 @@ def start_season(
 )
 def end_season(session: SessionDep) -> Message:
     """Завершить текущий сезон (админ)"""
-    season = session.exec(select(Season).where(Season.is_active == True)).first()
+    season = session.exec(select(Season).where(Season.is_active)).first()
     if not season:
         raise HTTPException(status_code=400, detail="No active season")
 

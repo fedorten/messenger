@@ -1,6 +1,4 @@
 import json
-import re
-import traceback
 from typing import Any
 
 
@@ -20,9 +18,9 @@ class BotExecutor:
         """Execute the bot code and return result"""
         try:
             if self.language == "python":
-                return self._execute_python()
+                return self._normalize_result(self._execute_python())
             elif self.language == "javascript":
-                return self._execute_javascript()
+                return self._normalize_result(self._execute_javascript())
             else:
                 return {
                     "response": f"Unknown language: {self.language}",
@@ -35,6 +33,20 @@ class BotExecutor:
                 "media_type": None,
                 "media_url": None,
             }
+
+    def _normalize_result(self, result: dict[str, Any]) -> dict[str, Any]:
+        response = result.get("response", "")
+        if response is None:
+            response = ""
+        response = str(response).strip()
+        if not response:
+            response = "Бот не вернул ответ"
+
+        return {
+            "response": response[:4096],
+            "media_type": result.get("media_type") or result.get("mediaType"),
+            "media_url": result.get("media_url") or result.get("mediaUrl"),
+        }
 
     def _execute_python(self) -> dict:
         """Execute Python code"""
@@ -101,7 +113,11 @@ JSON.stringify({{ response, mediaType, mediaUrl }});
             )
             if result.returncode == 0:
                 parsed = json.loads(result.stdout.strip())
-                return parsed
+                return {
+                    "response": parsed.get("response", ""),
+                    "media_type": parsed.get("mediaType"),
+                    "media_url": parsed.get("mediaUrl"),
+                }
             else:
                 return {
                     "response": f"JS Error: {result.stderr}",

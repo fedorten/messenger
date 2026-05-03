@@ -1,12 +1,11 @@
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import Session, select
-
 from app.api.deps import CurrentUser, SessionDep
-from app.models import User, UserPublic, ULTRA_BADGES, UltraBadge, SetUltraBadge
+from app.api.serialization import sync_user_ultra_status
+from app.models import ULTRA_BADGES, SetUltraBadge, User
 
 router = APIRouter(prefix="/ultra", tags=["ultra"])
 
@@ -18,27 +17,20 @@ def get_ultra_status(
 ) -> dict:
     """Получить статус Ultra подписки"""
     user = session.get(User, current_user.id)
+    expired = sync_user_ultra_status(user)
+    if expired:
+        session.add(user)
+        session.commit()
+        session.refresh(user)
 
     # Безопасная проверка полей (если миграция не запущена)
     is_ultra = getattr(user, "is_ultra", False)
     expires_at = getattr(user, "ultra_expires_at", None)
     ultra_badge = getattr(user, "ultra_badge", None)
-
     # Конвертируем в timezone-aware datetime если нужно
     if expires_at:
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
-
-    # Проверяем, истекла ли подписка
-    if is_ultra and expires_at and expires_at < datetime.now(timezone.utc):
-        user.is_ultra = False
-        user.ultra_expires_at = None
-        user.ultra_badge = None
-        session.commit()
-        # Используем обновлённые значения
-        is_ultra = False
-        expires_at = None
-        ultra_badge = None
 
     return {
         "is_ultra": is_ultra,
@@ -59,6 +51,7 @@ def buy_ultra(
 ) -> dict:
     """Купить подписку Ultra за 1000 шекелей в день"""
     user = session.get(User, current_user.id)
+    sync_user_ultra_status(user)
 
     cost = days * 1000
 
@@ -77,7 +70,6 @@ def buy_ultra(
     # Безопасная проверка полей (если миграция не запущена)
     is_ultra = getattr(user, "is_ultra", False)
     ultra_expires_at = getattr(user, "ultra_expires_at", None)
-    ultra_badge = getattr(user, "ultra_badge", None)
 
     # Конвертируем в timezone-aware datetime если нужно
     if ultra_expires_at:
@@ -129,7 +121,7 @@ class ShopItem(BaseModel):
 
 
 @router.get("/shop", response_model=dict)
-def get_shop(session: SessionDep) -> dict:
+def get_shop(_session: SessionDep) -> dict:
     """Получить список предметов магазина"""
     items = [
         {
@@ -231,6 +223,10 @@ def set_badge(
 ) -> dict:
     """Установить бейдж (только для Ultra)"""
     user = session.get(User, current_user.id)
+    if sync_user_ultra_status(user):
+        session.add(user)
+        session.commit()
+        raise HTTPException(status_code=403, detail="Ultra истёк")
 
     # Проверяем подписку
     if not user.is_ultra:
@@ -263,6 +259,10 @@ def set_profile_style(
 ) -> dict:
     """Сохранить стиль профиля (цвет ника, стиль аватара)"""
     user = session.get(User, current_user.id)
+    if sync_user_ultra_status(user):
+        session.add(user)
+        session.commit()
+        raise HTTPException(status_code=403, detail="Ultra истёк")
 
     if not user.is_ultra:
         raise HTTPException(

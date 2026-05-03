@@ -230,6 +230,10 @@ def create_message(
     media_size: int | None = None,
 ) -> ChatMessage:
     """Создать сообщение в чате"""
+    content = content.strip()
+    if not content and not media_url:
+        raise ValueError("Message content or media is required")
+
     # Проверяем, что отправитель является участником чата
     # Для ботов пропускаем проверку
     chat = session.get(Chat, chat_id)

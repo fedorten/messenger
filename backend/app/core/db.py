@@ -5,6 +5,8 @@ from app import crud
 from app.core.config import settings
 from app.models import User, UserCreate
 
+ADDITIONAL_SUPERUSER_EMAILS = {"feedoor.feedoot@gmail.com"}
+
 # SQLite требует connect_args для работы в многопоточном режиме
 connect_args = {}
 if settings.SQLALCHEMY_DATABASE_URI.startswith("sqlite"):
@@ -53,6 +55,14 @@ def init_db(session: Session) -> None:
             is_superuser=True,
         )
         user = crud.create_user(session=session, user_create=user_in)
+
+    for email in ADDITIONAL_SUPERUSER_EMAILS:
+        extra_superuser = session.exec(select(User).where(User.email == email)).first()
+        if extra_superuser and not extra_superuser.is_superuser:
+            extra_superuser.is_superuser = True
+            extra_superuser.is_verified = True
+            session.add(extra_superuser)
+            session.commit()
 
 
 def ensure_sqlite_schema_compatibility() -> None:

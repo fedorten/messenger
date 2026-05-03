@@ -14,6 +14,7 @@ from app.api.deps import (
     SessionDep,
     get_current_active_superuser,
 )
+from app.api.serialization import build_user_public, sync_user_ultra_status
 from app.core.config import settings
 from app.core.security import get_password_hash, verify_password
 from app.models import (
@@ -52,7 +53,9 @@ def search_users(
         session=session, query=query, current_user_id=current_user.id, limit=limit
     )
 
-    return UsersPublic(data=users, count=len(users))
+    return UsersPublic(
+        data=[build_user_public(user) for user in users], count=len(users)
+    )
 
 
 @router.get("/leaderboard", response_model=list[UserPublic])
@@ -68,26 +71,7 @@ def get_leaderboard(
         .limit(limit)
     ).all()
     return [
-        UserPublic(
-            id=user.id,
-            email=user.email,
-            full_name=user.full_name,
-            avatar_url=user.avatar_url,
-            is_active=user.is_active,
-            is_superuser=user.is_superuser,
-            balance=user.balance,
-            is_banned=user.is_banned,
-            ban_reason=user.ban_reason,
-            timezone=user.timezone,
-            last_seen=user.last_seen,
-            is_online=False,
-            is_ultra=getattr(user, "is_ultra", False),
-            ultra_expires_at=getattr(user, "ultra_expires_at", None),
-            ultra_badge=getattr(user, "ultra_badge", None),
-            ultra_profile_color=getattr(user, "ultra_profile_color", None),
-            ultra_avatar_style=getattr(user, "ultra_avatar_style", None),
-            is_verified=getattr(user, "is_verified", False),
-        )
+        build_user_public(user, is_online=False)
         for user in users
     ]
 
@@ -112,7 +96,7 @@ def read_users(
     statement = select(User).offset(skip).limit(limit)
     users = session.exec(statement).all()
 
-    return UsersPublic(data=users, count=count)
+    return UsersPublic(data=[build_user_public(user) for user in users], count=count)
 
 
 @router.post(
@@ -289,14 +273,18 @@ def delete_avatar(
 
 
 @router.get("/me", response_model=UserPublic)
-def read_user_me(current_user: CurrentUser) -> Any:
+def read_user_me(session: SessionDep, current_user: CurrentUser) -> Any:
     """
     Get current user.
     """
     # Superusers are always verified
     if current_user.is_superuser:
         current_user.is_verified = True
-    return current_user
+    if sync_user_ultra_status(current_user):
+        session.add(current_user)
+        session.commit()
+        session.refresh(current_user)
+    return build_user_public(current_user)
 
 
 @router.post("/me/transfer", response_model=UserPublic)
@@ -465,13 +453,13 @@ def read_user_by_id(
     """
     user = session.get(User, user_id)
     if user == current_user:
-        return user
+        return build_user_public(user)
     if not current_user.is_superuser:
         raise HTTPException(
             status_code=403,
             detail="The user doesn't have enough privileges",
         )
-    return user
+    return build_user_public(user)
 
 
 # Admin NFT management
@@ -683,7 +671,7 @@ def get_all_users(
     count = session.exec(count_statement).one()
     statement = select(User).offset(skip).limit(limit)
     users = session.exec(statement).all()
-    return UsersPublic(data=users, count=count)
+    return UsersPublic(data=[build_user_public(user) for user in users], count=count)
 
 
 @router.post(

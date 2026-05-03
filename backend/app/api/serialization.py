@@ -1,12 +1,45 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlmodel import Session, select
 
 from app.models import Chat, ChatMember, ChatMessage, User, UserPublic
 
 
+def _as_aware_utc(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def sync_user_ultra_status(user: User | None) -> bool:
+    """Apply Ultra expiration rules to a user object before it is exposed."""
+    if not user:
+        return False
+
+    expires_at = _as_aware_utc(getattr(user, "ultra_expires_at", None))
+    is_expired = bool(
+        getattr(user, "is_ultra", False)
+        and expires_at
+        and expires_at <= datetime.now(timezone.utc)
+    )
+    if not is_expired:
+        return False
+
+    user.is_ultra = False
+    user.ultra_expires_at = None
+    user.ultra_badge = None
+    user.ultra_profile_color = None
+    user.ultra_avatar_style = None
+    return True
+
+
 def build_user_public(user: User, *, is_online: bool | None = None) -> UserPublic:
     """Build a full UserPublic payload from a SQLModel user."""
+    sync_user_ultra_status(user)
     public_user = UserPublic.model_validate(user, from_attributes=True)
     if is_online is not None:
         public_user.is_online = is_online

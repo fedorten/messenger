@@ -2,7 +2,7 @@
   <div class="post-view-container">
     <header class="post-header">
       <button @click="goBack" class="back-btn">← Назад</button>
-      <button v-if="isAuthor" @click="deletePost" class="delete-btn">🗑️ Удалить</button>
+      <button v-if="canModeratePost" @click="deletePost" class="delete-btn">🗑️ Удалить</button>
     </header>
 
     <div v-if="loading" class="loading">Загрузка...</div>
@@ -44,7 +44,7 @@
               <span class="comment-date">{{ formatDate(comment.created_at) }}</span>
             </div>
             <p class="comment-text">{{ comment.content }}</p>
-            <button v-if="comment.author_id === currentUserId" @click="deleteComment(comment.id)" class="delete-comment-btn">×</button>
+            <button v-if="canModerateComment(comment)" @click="deleteComment(comment.id)" class="delete-comment-btn">×</button>
           </div>
           
           <div v-if="comments.length === 0" class="empty-comments">
@@ -72,13 +72,16 @@ export default {
     const loading = ref(true)
     const newComment = ref('')
     const currentUserId = ref(null)
+    const isSuperuser = ref(false)
 
     const isAuthor = computed(() => post.value && currentUserId.value && post.value.author_id === currentUserId.value)
+    const canModeratePost = computed(() => isAuthor.value || isSuperuser.value)
 
     const loadPost = async () => {
       try {
         const user = await authAPI.getCurrentUser()
         currentUserId.value = user.id
+        isSuperuser.value = Boolean(user.is_superuser)
         
         const postRes = await forumAPI.getPost(route.params.postId)
         post.value = postRes
@@ -125,6 +128,10 @@ export default {
       }
     }
 
+    const canModerateComment = (comment) => {
+      return isSuperuser.value || comment.author_id === currentUserId.value
+    }
+
     const deletePost = async () => {
       if (!confirm('Удалить пост?')) return
       try {
@@ -158,9 +165,11 @@ export default {
       newComment,
       currentUserId,
       isAuthor,
+      canModeratePost,
       likePost,
       addComment,
       deleteComment,
+      canModerateComment,
       deletePost,
       goBack,
       getInitials,

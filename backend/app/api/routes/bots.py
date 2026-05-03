@@ -30,9 +30,7 @@ def get_my_bots(session: SessionDep, current_user: CurrentUser) -> list[ChatBot]
 
 
 @router.get("/all")
-def get_all_bots(
-    session: SessionDep, current_user: CurrentUser
-) -> list[ChatBotPublic]:
+def get_all_bots(session: SessionDep, current_user: CurrentUser) -> list[ChatBotPublic]:
     """Get all public bots plus the current user's private bots"""
     statement = select(ChatBot).where(
         ChatBot.is_active,

@@ -259,7 +259,11 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
                                     session=session,
                                     chat_id=chat_id,
                                     sender_id=0,
-                                    content=result.get("response", ""),
+                                    content=(
+                                        result.get("response") or "Бот не вернул ответ"
+                                    ).strip()[:4096],
+                                    media_type=result.get("media_type"),
+                                    media_url=result.get("media_url"),
                                 )
                                 session.commit()
                                 bot_msg_public = ChatMessagePublic(

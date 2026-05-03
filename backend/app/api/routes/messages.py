@@ -31,6 +31,10 @@ router = APIRouter(prefix="/messages", tags=["messages"])
 logger = logging.getLogger(__name__)
 
 
+def _get_bot_response_content(result: dict[str, Any]) -> str:
+    return (result.get("response") or "Бот не вернул ответ").strip()[:4096]
+
+
 async def broadcast_message_to_chat(message_public: ChatMessagePublic, chat_id: int):
     """Транслировать сообщение всем участникам чата через WebSocket"""
     # Используем mode='json' для правильной сериализации datetime
@@ -121,7 +125,9 @@ async def create_message(
                     session=session,
                     chat_id=chat_id,
                     sender_id=0,  # System user ID for bot
-                    content=result.get("response", ""),
+                    content=_get_bot_response_content(result),
+                    media_type=result.get("media_type"),
+                    media_url=result.get("media_url"),
                 )
                 session.commit()  # Commit immediately
 

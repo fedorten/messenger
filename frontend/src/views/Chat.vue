@@ -154,6 +154,9 @@
             <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
           </svg>
         </label>
+        <button @click="openDrawingModal" class="draw-btn" type="button" title="Нарисовать">
+          ✎
+        </button>
         <input
           v-model="newMessage"
           type="text"
@@ -164,13 +167,53 @@
         <button @click="sendToAI" class="ai-btn" title="Отправить ИИ">
           ✨
         </button>
-        <button @click="sendMessage" :disabled="!newMessage.trim() && !selectedFile">
-          Отправить
+        <button
+          @click="sendMessage"
+          :disabled="!newMessage.trim() && !selectedFile"
+          class="send-btn"
+          aria-label="Отправить"
+        >
+          <span class="send-text">Отправить</span>
+          <span class="send-icon">➤</span>
         </button>
       </div>
       <div v-if="selectedFile" class="file-preview">
         <span class="file-name">{{ selectedFile.name }}</span>
         <button @click="clearFile" class="clear-file">×</button>
+      </div>
+    </div>
+
+    <div v-if="showDrawingModal" class="modal-overlay" @click.self="closeDrawingModal">
+      <div class="modal-content drawing-modal">
+        <div class="modal-header">
+          <h3>Рисунок</h3>
+          <button @click="closeDrawingModal" class="close-btn">×</button>
+        </div>
+        <div class="drawing-toolbar">
+          <label class="drawing-control">
+            <span>Цвет</span>
+            <input v-model="drawingColor" type="color" />
+          </label>
+          <label class="drawing-control drawing-size-control">
+            <span>Карандаш</span>
+            <input v-model.number="drawingSize" type="range" min="2" max="40" />
+            <span class="drawing-size-value">{{ drawingSize }}</span>
+          </label>
+          <button @click="clearDrawingCanvas" class="btn-secondary" type="button">Очистить</button>
+        </div>
+        <canvas
+          ref="drawingCanvas"
+          class="drawing-canvas"
+          @pointerdown="startDrawing"
+          @pointermove="drawOnCanvas"
+          @pointerup="stopDrawing"
+          @pointercancel="stopDrawing"
+          @pointerleave="stopDrawing"
+        ></canvas>
+        <div class="modal-actions">
+          <button @click="closeDrawingModal" class="btn-secondary">Отмена</button>
+          <button @click="attachDrawing" class="btn-primary">Прикрепить</button>
+        </div>
       </div>
     </div>
 
@@ -376,9 +419,16 @@ export default {
     const fileInput = ref(null)
     const selectedFile = ref(null)
     const uploading = ref(false)
+    const showDrawingModal = ref(false)
+    const drawingCanvas = ref(null)
+    const drawingColor = ref('#111827')
+    const drawingSize = ref(6)
+    const isDrawing = ref(false)
+    const lastDrawingPoint = ref(null)
     const onlineUsers = ref(new Set())
     const typingUser = ref(null)
     let typingTimeout = null
+    let pollInterval = null
     
     // Call state
     const inCall = ref(false)
@@ -643,6 +693,10 @@ export default {
         try {
           const message = await messagesAPI.sendMessage(chatId, content, mediaData)
           messages.value.push(message)
+          if (isBotChat.value) {
+            const response = await chatsAPI.getMessages(chatId)
+            messages.value = response.data || messages.value
+          }
           scrollToBottom()
           clearFile()
         } catch (error) {
@@ -774,6 +828,103 @@ export default {
 
     const clearFile = () => {
       selectedFile.value = null
+    }
+
+    const prepareDrawingCanvas = () => {
+      const canvas = drawingCanvas.value
+      if (!canvas) return
+
+      const ratio = window.devicePixelRatio || 1
+      const rect = canvas.getBoundingClientRect()
+      canvas.width = Math.max(1, Math.floor(rect.width * ratio))
+      canvas.height = Math.max(1, Math.floor(rect.height * ratio))
+
+      const ctx = canvas.getContext('2d')
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, rect.width, rect.height)
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+    }
+
+    const openDrawingModal = async () => {
+      showDrawingModal.value = true
+      await nextTick()
+      prepareDrawingCanvas()
+    }
+
+    const closeDrawingModal = () => {
+      showDrawingModal.value = false
+      isDrawing.value = false
+      lastDrawingPoint.value = null
+    }
+
+    const getCanvasPoint = (event) => {
+      const canvas = drawingCanvas.value
+      const rect = canvas.getBoundingClientRect()
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      }
+    }
+
+    const startDrawing = (event) => {
+      const canvas = drawingCanvas.value
+      if (!canvas) return
+
+      event.preventDefault()
+      canvas.setPointerCapture?.(event.pointerId)
+      isDrawing.value = true
+      const point = getCanvasPoint(event)
+      lastDrawingPoint.value = point
+
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = drawingColor.value
+      ctx.beginPath()
+      ctx.arc(point.x, point.y, drawingSize.value / 2, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    const drawOnCanvas = (event) => {
+      if (!isDrawing.value || !lastDrawingPoint.value) return
+
+      event.preventDefault()
+      const canvas = drawingCanvas.value
+      const point = getCanvasPoint(event)
+      const ctx = canvas.getContext('2d')
+      ctx.strokeStyle = drawingColor.value
+      ctx.lineWidth = drawingSize.value
+      ctx.beginPath()
+      ctx.moveTo(lastDrawingPoint.value.x, lastDrawingPoint.value.y)
+      ctx.lineTo(point.x, point.y)
+      ctx.stroke()
+      lastDrawingPoint.value = point
+    }
+
+    const stopDrawing = (event) => {
+      drawingCanvas.value?.releasePointerCapture?.(event.pointerId)
+      isDrawing.value = false
+      lastDrawingPoint.value = null
+    }
+
+    const clearDrawingCanvas = () => {
+      prepareDrawingCanvas()
+    }
+
+    const attachDrawing = async () => {
+      const canvas = drawingCanvas.value
+      if (!canvas) return
+
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+      if (!blob) {
+        alert('Не удалось сохранить рисунок')
+        return
+      }
+
+      selectedFile.value = new File([blob], `drawing-${Date.now()}.png`, {
+        type: 'image/png',
+      })
+      closeDrawingModal()
     }
 
     const setupWebSocket = () => {
@@ -1257,7 +1408,7 @@ export default {
         setupWebSocket()
         
         // Polling for new messages (fallback if WebSocket fails)
-        setInterval(async () => {
+        pollInterval = setInterval(async () => {
           if (!ws.value || !ws.value.ws || ws.value.ws.readyState !== WebSocket.OPEN) {
             try {
               const response = await chatsAPI.getMessages(chatId)
@@ -1288,6 +1439,7 @@ export default {
         ws.value.disconnect()
       }
       if (typingTimeout) clearTimeout(typingTimeout)
+      if (pollInterval) clearInterval(pollInterval)
       endCall()
     })
 
@@ -1340,6 +1492,10 @@ export default {
       selectedFile,
       uploading,
       fileInput,
+      showDrawingModal,
+      drawingCanvas,
+      drawingColor,
+      drawingSize,
       currentChat,
       sendMessage,
       handleTyping,
@@ -1351,6 +1507,13 @@ export default {
       formatTime,
       handleFileSelect,
       clearFile,
+      openDrawingModal,
+      closeDrawingModal,
+      startDrawing,
+      drawOnCanvas,
+      stopDrawing,
+      clearDrawingCanvas,
+      attachDrawing,
       handleMemberSearch,
       setupWebSocket,
       toggleAddMember,
@@ -1673,6 +1836,7 @@ deleteMessage,
   background: var(--bg-card);
   gap: 0.75rem;
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.2);
+  align-items: center;
 }
 
 .typing-indicator {
@@ -1798,6 +1962,7 @@ deleteMessage,
 
 .input-container input {
   flex: 1;
+  min-width: 0;
   padding: 0.875rem 1rem;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -1819,6 +1984,7 @@ deleteMessage,
 }
 
 .input-container button {
+  flex: 0 0 auto;
   padding: 0.875rem 1.5rem;
   background: linear-gradient(135deg, var(--primary-purple) 0%, var(--primary-purple-light) 100%);
   color: white;
@@ -1829,6 +1995,10 @@ deleteMessage,
   font-weight: 600;
   transition: all 0.3s ease;
   box-shadow: 0 4px 15px rgba(147, 51, 234, 0.4);
+}
+
+.send-icon {
+  display: none;
 }
 
 .input-container button:hover:not(:disabled) {
@@ -2197,12 +2367,94 @@ deleteMessage,
   cursor: pointer;
   color: var(--text-secondary);
   transition: all 0.3s ease;
+  flex: 0 0 44px;
 }
 
 .attach-btn:hover {
   background: var(--bg-card-hover);
   border-color: var(--primary-purple);
   color: var(--primary-purple-light);
+}
+
+.input-container .draw-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: rgba(10, 10, 10, 0.5);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.25rem;
+  line-height: 1;
+  transition: all 0.3s ease;
+  flex: 0 0 44px;
+}
+
+.input-container .draw-btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--primary-purple);
+  color: var(--primary-purple-light);
+}
+
+.drawing-modal {
+  max-width: 720px;
+}
+
+.drawing-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+
+.drawing-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.drawing-control input[type="color"] {
+  width: 44px;
+  height: 36px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.drawing-size-control {
+  flex: 1 1 220px;
+}
+
+.drawing-size-control input[type="range"] {
+  flex: 1;
+  min-width: 140px;
+}
+
+.drawing-size-value {
+  min-width: 2rem;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.drawing-canvas {
+  display: block;
+  width: calc(100% - 3rem);
+  height: 360px;
+  margin: 1rem 1.5rem;
+  background: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  touch-action: none;
+  cursor: crosshair;
 }
 
 .file-preview {
@@ -2458,6 +2710,76 @@ deleteMessage,
   background: #7c3aed;
 }
 
+@media (max-width: 640px) {
+  .chat-container {
+    height: 100dvh;
+    max-width: none;
+  }
+
+  .chat-header {
+    padding: 0.75rem;
+    gap: 0.5rem;
+  }
+
+  .chat-title {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .chat-header h2 {
+    text-align: left;
+    font-size: 1rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .back-btn {
+    padding: 0.5rem 0.75rem;
+    flex: 0 0 auto;
+  }
+
+  .messages-container {
+    padding: 0.75rem;
+  }
+
+  .message {
+    max-width: 92%;
+    padding: 0.75rem;
+  }
+
+  .input-container {
+    padding: 0.75rem;
+    gap: 0.5rem;
+  }
+
+  .input-container input {
+    font-size: 16px;
+    padding: 0.75rem;
+  }
+
+  .input-container button,
+  .attach-btn {
+    width: 42px;
+    height: 42px;
+    min-width: 42px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .send-text {
+    display: none;
+  }
+
+  .send-icon {
+    display: inline;
+    font-size: 1rem;
+    line-height: 1;
+  }
+}
+
 .ai-modal {
   max-width: 500px;
 }
@@ -2570,4 +2892,3 @@ deleteMessage,
   margin-bottom: 16px;
 }
 </style>
-
