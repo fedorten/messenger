@@ -313,63 +313,64 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
                 )
 
             elif message_data.get("type") == "call_offer":
-                # Входящий звонок - отправляем через broadcast в конкретный чат
-                # Это работает даже если пользователь не в глобальном мониторинге
                 target_user_id = message_data.get("target_user_id")
                 if target_user_id:
-                    # Отправляем всем в чате, включая целевого пользователя
-                    await manager.broadcast_to_chat(
-                        {
-                            "type": "call_offer",
-                            "from_user_id": user.id,
-                            "from_user_name": user.full_name or user.email,
-                            "chat_id": chat_id,
-                            "sdp": message_data.get("sdp"),
-                            "target_user_id": target_user_id,
-                        },
-                        chat_id,
-                    )
+                    target_user_id = int(target_user_id)
+                    payload = {
+                        "type": "call_offer",
+                        "from_user_id": user.id,
+                        "from_user_name": user.full_name or user.email,
+                        "chat_id": chat_id,
+                        "sdp": message_data.get("sdp"),
+                        "target_user_id": target_user_id,
+                        "call_mode": message_data.get("call_mode", "audio"),
+                    }
+                    await manager.send_to_user(payload, target_user_id)
 
             elif message_data.get("type") == "call_answer":
                 # Ответ на звонок
                 target_user_id = message_data.get("target_user_id")
                 if target_user_id:
-                    await manager.broadcast_to_chat(
+                    target_user_id = int(target_user_id)
+                    await manager.send_to_user(
                         {
                             "type": "call_answer",
                             "from_user_id": user.id,
                             "accepted": message_data.get("accepted"),
                             "sdp": message_data.get("sdp"),
                             "target_user_id": target_user_id,
+                            "call_mode": message_data.get("call_mode", "audio"),
                         },
-                        chat_id,
+                        target_user_id,
                     )
 
             elif message_data.get("type") == "call_ice":
                 # ICE кандидаты
                 target_user_id = message_data.get("target_user_id")
                 if target_user_id:
-                    await manager.broadcast_to_chat(
+                    target_user_id = int(target_user_id)
+                    await manager.send_to_user(
                         {
                             "type": "call_ice",
                             "from_user_id": user.id,
                             "candidate": message_data.get("candidate"),
                             "target_user_id": target_user_id,
                         },
-                        chat_id,
+                        target_user_id,
                     )
 
             elif message_data.get("type") == "call_end":
                 # Завершение звонка
                 target_user_id = message_data.get("target_user_id")
                 if target_user_id:
-                    await manager.broadcast_to_chat(
+                    target_user_id = int(target_user_id)
+                    await manager.send_to_user(
                         {
                             "type": "call_end",
                             "from_user_id": user.id,
                             "target_user_id": target_user_id,
                         },
-                        chat_id,
+                        target_user_id,
                     )
 
     except WebSocketDisconnect:

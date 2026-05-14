@@ -1,7 +1,7 @@
 <template>
   <div class="chat-container">
     <header class="chat-header">
-      <button @click="goBack" class="back-btn">← Назад</button>
+      <button @click="goBack" class="back-btn" aria-label="Назад">‹</button>
       <div class="chat-title" @click="isAdmin && !isEditingName && (isEditingName = true)">
         <h2 v-if="!isEditingName">{{ chatName }}</h2>
         <input 
@@ -16,6 +16,24 @@
         />
 </div>
       <div class="header-actions">
+        <button
+          v-if="!isGroupChat && !isBotChat"
+          @click="startCall('audio')"
+          class="call-btn"
+          title="Позвонить"
+          aria-label="Позвонить"
+        >
+          <span>☎</span>
+        </button>
+        <button
+          v-if="!isGroupChat && !isBotChat"
+          @click="startCall('video')"
+          class="call-btn video-call-btn"
+          title="Видеозвонок"
+          aria-label="Видеозвонок"
+        >
+          <span>▣</span>
+        </button>
         <button
           v-if="isGroupChat"
           @click="showGroupMembers = true"
@@ -93,6 +111,7 @@
               @click="openMediaModal(message)"
             />
             <div v-else-if="message.media_type === 'audio'" class="media-audio">
+              <span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
               <audio :src="message.media_url" controls></audio>
             </div>
             <div v-else-if="message.media_type === 'document'" class="media-document">
@@ -111,33 +130,57 @@
       </div>
 
       <div v-if="typingUser" class="typing-indicator">
-        {{ typingUser }} печатает
+        <span>{{ typingUser }} печатает</span><i></i><i></i><i></i>
       </div>
 
       <!-- Incoming Call Modal -->
       <div v-if="incomingCall" class="call-modal incoming-call">
         <div class="call-content">
-          <div class="call-icon">📞</div>
+          <div class="call-avatar">{{ getCallInitials(incomingCall.from_user_name) }}</div>
           <div class="call-status">Входящий звонок</div>
           <div class="call-user">{{ incomingCall.from_user_name || 'Пользователь' }}</div>
           <div class="call-actions">
-            <button @click="acceptCall" class="accept-btn">Принять</button>
-            <button @click="declineCall" class="decline-btn">Отклонить</button>
+            <button @click="declineCall" class="decline-btn" aria-label="Отклонить">✕</button>
+            <button @click="acceptCall" class="accept-btn" aria-label="Принять">✓</button>
           </div>
         </div>
       </div>
 
       <!-- Active Call Modal -->
       <div v-else-if="inCall" class="call-modal">
-        <div class="call-info">
-          <div class="call-status">
-            <span v-if="callStatus === 'calling'">Звоним...</span>
-            <span v-else-if="callStatus === 'connected'">Соединено</span>
-            <span v-else>Звонок</span>
+        <div :class="['call-panel', { 'video-call': showsVideoStage }]">
+          <div v-if="showsVideoStage" class="video-stage">
+            <video ref="remoteVideoRef" class="remote-video" autoplay playsinline></video>
+            <video ref="localVideoRef" class="local-video" autoplay muted playsinline></video>
+            <div v-if="callStatus !== 'connected'" class="video-placeholder">
+              {{ remoteUser?.name || 'Пользователь' }}
+            </div>
           </div>
-          <div class="call-user">{{ remoteUser?.name || 'Пользователь' }}</div>
+          <div v-else class="call-info">
+            <div class="call-avatar">{{ getCallInitials(remoteUser?.name) }}</div>
+            <div class="call-user">{{ remoteUser?.name || 'Пользователь' }}</div>
+            <div class="call-status">
+              <span v-if="callStatus === 'calling'">Звоним...</span>
+              <span v-else-if="callStatus === 'connecting'">Подключение...</span>
+              <span v-else-if="callStatus === 'connected'">Соединено</span>
+              <span v-else>Звонок</span>
+            </div>
+          </div>
+          <div class="call-controls">
+            <button @click="toggleMute" :class="['call-control-btn', { active: isMuted }]" aria-label="Микрофон">
+              {{ isMuted ? '⌁' : '♪' }}
+            </button>
+            <button
+              v-if="canToggleCamera"
+              @click="toggleCamera"
+              :class="['call-control-btn', { active: !isCameraOn }]"
+              aria-label="Камера"
+            >
+              ▣
+            </button>
+            <button @click="endCall" class="end-call-btn" aria-label="Завершить">✕</button>
+          </div>
         </div>
-        <button @click="endCall" class="end-call-btn">Завершить</button>
         <audio ref="audioRef" autoplay></audio>
       </div>
 
@@ -164,6 +207,15 @@
           @keyup.enter="sendMessage"
           @input="handleTyping"
         />
+        <button
+          @click="toggleVoiceRecording"
+          :class="['voice-btn', { recording: isRecording }]"
+          type="button"
+          :title="isRecording ? 'Остановить запись' : 'Голосовое сообщение'"
+          aria-label="Голосовое сообщение"
+        >
+          {{ isRecording ? '■' : '●' }}
+        </button>
         <button @click="sendToAI" class="ai-btn" title="Отправить ИИ">
           ✨
         </button>
@@ -176,6 +228,11 @@
           <span class="send-text">Отправить</span>
           <span class="send-icon">➤</span>
         </button>
+      </div>
+      <div v-if="isRecording" class="recording-indicator">
+        <span class="recording-dot"></span>
+        <span>Идёт запись голосового сообщения</span>
+        <span class="recording-time">{{ recordingTime }}с</span>
       </div>
       <div v-if="selectedFile" class="file-preview">
         <span class="file-name">{{ selectedFile.name }}</span>
@@ -199,7 +256,9 @@
             <input v-model.number="drawingSize" type="range" min="2" max="40" />
             <span class="drawing-size-value">{{ drawingSize }}</span>
           </label>
-          <button @click="clearDrawingCanvas" class="btn-secondary" type="button">Очистить</button>
+          <button @click="clearDrawingCanvas" class="drawing-action-btn drawing-clear-btn" type="button">
+            Очистить
+          </button>
         </div>
         <canvas
           ref="drawingCanvas"
@@ -211,8 +270,8 @@
           @pointerleave="stopDrawing"
         ></canvas>
         <div class="modal-actions">
-          <button @click="closeDrawingModal" class="btn-secondary">Отмена</button>
-          <button @click="attachDrawing" class="btn-primary">Прикрепить</button>
+          <button @click="closeDrawingModal" class="drawing-action-btn drawing-cancel-btn">Отмена</button>
+          <button @click="attachDrawing" class="drawing-action-btn drawing-attach-btn">Прикрепить</button>
         </div>
       </div>
     </div>
@@ -382,7 +441,7 @@
 </template>
 
 <script>
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { computed, ref, shallowRef, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { chatsAPI, messagesAPI, authAPI } from '../services/api'
 import { ChatWebSocket } from '../services/websocket'
@@ -421,7 +480,7 @@ export default {
     const uploading = ref(false)
     const showDrawingModal = ref(false)
     const drawingCanvas = ref(null)
-    const drawingColor = ref('#111827')
+    const drawingColor = ref('#7c3aed')
     const drawingSize = ref(6)
     const isDrawing = ref(false)
     const lastDrawingPoint = ref(null)
@@ -434,12 +493,39 @@ export default {
     const inCall = ref(false)
     const callStatus = ref('') // 'calling', 'ringing', 'connected', 'ended'
     const remoteUser = ref(null)
-    const localStream = ref(null)
-    const peerConnection = ref(null)
+    const localStream = shallowRef(null)
+    const remoteStream = shallowRef(null)
+    const peerConnection = shallowRef(null)
     const incomingCall = ref(null)
     const audioRef = ref(null)
+    const localVideoRef = ref(null)
+    const remoteVideoRef = ref(null)
+    const callMode = ref('audio')
+    const isMuted = ref(false)
+    const isCameraOn = ref(false)
+    const canToggleCamera = ref(false)
+    const hasRemoteVideo = ref(false)
+    const pendingIceCandidates = ref([])
+    const isRecording = ref(false)
+    const recordingTime = ref(0)
+    const mediaRecorder = shallowRef(null)
+    const voiceChunks = ref([])
+    let recordingTimer = null
+
+    const showsVideoStage = computed(() => isCameraOn.value || hasRemoteVideo.value)
 
     const isUserOnline = (userId) => onlineUsers.value.has(userId)
+
+    const getCallInitials = (name) => {
+      const value = name || remoteUser.value?.name || chatName.value || 'Пользователь'
+      return value
+        .split(' ')
+        .filter(Boolean)
+        .map(part => part[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2)
+    }
 
     const getSenderInitials = (message) => {
       if (message.sender_id === 0 && isBotChat.value) {
@@ -575,6 +661,12 @@ export default {
       return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
     }
 
+    const openMediaModal = (message) => {
+      if (message?.media_url) {
+        window.open(message.media_url, '_blank', 'noopener,noreferrer')
+      }
+    }
+
     const scrollToBottom = async (force = false) => {
       if (!force && !shouldAutoScroll.value) return
       
@@ -612,6 +704,18 @@ export default {
       const threshold = 100 // пикселей от низа
       const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold
       shouldAutoScroll.value = isNearBottom
+    }
+
+    const sendMessageWithMedia = async (content, mediaData = null) => {
+      if (ws.value && ws.value.ws && ws.value.ws.readyState === WebSocket.OPEN) {
+        ws.value.sendMessage(content, mediaData)
+        return null
+      }
+
+      const message = await messagesAPI.sendMessage(chatId, content, mediaData)
+      messages.value.push(message)
+      scrollToBottom()
+      return message
     }
 
     const sendMessage = async () => {
@@ -826,6 +930,82 @@ export default {
       event.target.value = ''
     }
 
+    const stopRecordingTimer = () => {
+      if (recordingTimer) {
+        clearInterval(recordingTimer)
+        recordingTimer = null
+      }
+    }
+
+    const startVoiceRecording = async () => {
+      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+        alert('Запись голоса не поддерживается в этом браузере')
+        return
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+        const recorderOptions = MediaRecorder.isTypeSupported('audio/webm')
+          ? { mimeType: 'audio/webm' }
+          : {}
+        const recorder = new MediaRecorder(stream, recorderOptions)
+        voiceChunks.value = []
+        mediaRecorder.value = recorder
+        recordingTime.value = 0
+
+        recorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            voiceChunks.value.push(event.data)
+          }
+        }
+
+        recorder.onstop = async () => {
+          stopRecordingTimer()
+          stream.getTracks().forEach(track => track.stop())
+          isRecording.value = false
+
+          const blob = new Blob(voiceChunks.value, { type: recorder.mimeType || 'audio/webm' })
+          voiceChunks.value = []
+          mediaRecorder.value = null
+
+          if (!blob.size) return
+
+          const extension = blob.type.includes('ogg') ? 'ogg' : 'webm'
+          const file = new File([blob], `voice-${Date.now()}.${extension}`, { type: blob.type })
+          try {
+            const mediaData = await messagesAPI.uploadMedia(file)
+            await sendMessageWithMedia(mediaData.media_filename || 'Голосовое сообщение', mediaData)
+          } catch (error) {
+            console.error('Error sending voice message:', error)
+            alert('Не удалось отправить голосовое сообщение')
+          }
+        }
+
+        recorder.start()
+        isRecording.value = true
+        recordingTimer = setInterval(() => {
+          recordingTime.value += 1
+        }, 1000)
+      } catch (error) {
+        console.error('Voice recording error:', error)
+        alert('Не удалось получить доступ к микрофону')
+      }
+    }
+
+    const stopVoiceRecording = () => {
+      if (mediaRecorder.value && mediaRecorder.value.state !== 'inactive') {
+        mediaRecorder.value.stop()
+      }
+    }
+
+    const toggleVoiceRecording = () => {
+      if (isRecording.value) {
+        stopVoiceRecording()
+      } else {
+        startVoiceRecording()
+      }
+    }
+
     const clearFile = () => {
       selectedFile.value = null
     }
@@ -980,23 +1160,23 @@ export default {
             }
           } else if (data.type === 'call_offer') {
             // Only process if this call is for us
-            if (data.target_user_id === currentUserId.value) {
+            if (Number(data.target_user_id) === currentUserId.value) {
               handleIncomingCall(data)
             }
           } else if (data.type === 'call_answer') {
             // Only process if this answer is for us
-            if (data.target_user_id === currentUserId.value) {
+            if (Number(data.target_user_id) === currentUserId.value) {
               handleCallAnswer(data)
             }
           } else if (data.type === 'call_ice') {
             // Only process if this ICE is for us
-            if (data.target_user_id === currentUserId.value) {
+            if (Number(data.target_user_id) === currentUserId.value) {
               handleRemoteIce(data)
             }
           } else if (data.type === 'call_end') {
             // Only process if this end is for us
-            if (data.target_user_id === currentUserId.value) {
-              endCall()
+            if (Number(data.target_user_id) === currentUserId.value) {
+              endCall(false)
             }
           }
         },
@@ -1015,7 +1195,118 @@ export default {
       return other?.user_id || null
     }
 
-    const startCall = async () => {
+    const attachRemoteStream = (stream) => {
+      remoteStream.value = stream
+      hasRemoteVideo.value = stream.getVideoTracks().length > 0
+      if (audioRef.value) {
+        audioRef.value.srcObject = stream
+        audioRef.value.play?.().catch(() => {})
+      }
+      if (remoteVideoRef.value) {
+        remoteVideoRef.value.srcObject = stream
+        remoteVideoRef.value.play?.().catch(() => {})
+      }
+    }
+
+    const syncLocalMediaState = () => {
+      const audioTrack = localStream.value?.getAudioTracks?.()[0] || null
+      const videoTrack = localStream.value?.getVideoTracks?.()[0] || null
+      isMuted.value = audioTrack ? !audioTrack.enabled : false
+      canToggleCamera.value = Boolean(videoTrack)
+      isCameraOn.value = Boolean(videoTrack?.enabled)
+    }
+
+    const createLocalStream = async (cameraEnabled = false) => {
+      const constraints = cameraEnabled
+        ? { audio: true, video: true }
+        : { audio: true, video: false }
+
+      try {
+        localStream.value = await navigator.mediaDevices.getUserMedia(constraints)
+        localStream.value.getVideoTracks().forEach(track => {
+          track.enabled = cameraEnabled
+        })
+      } catch (error) {
+        if (!cameraEnabled) {
+          throw error
+        }
+        localStream.value = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      }
+
+      syncLocalMediaState()
+      return localStream.value
+    }
+
+    const attachLocalStream = async () => {
+      await nextTick()
+      if (localVideoRef.value && localStream.value) {
+        localVideoRef.value.srcObject = localStream.value
+        localVideoRef.value.play?.().catch(() => {})
+      }
+    }
+
+    const attachCallStreams = async () => {
+      await attachLocalStream()
+      await nextTick()
+      if (audioRef.value && remoteStream.value) {
+        audioRef.value.srcObject = remoteStream.value
+        audioRef.value.play?.().catch(() => {})
+      }
+      if (remoteVideoRef.value && remoteStream.value) {
+        remoteVideoRef.value.srcObject = remoteStream.value
+        remoteVideoRef.value.play?.().catch(() => {})
+      }
+    }
+
+    const createPeerConnection = (targetUserId) => {
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      })
+
+      pc.ontrack = (event) => {
+        if (event.streams[0]) {
+          attachRemoteStream(event.streams[0])
+        }
+      }
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate && ws.value?.ws) {
+          ws.value.ws.send(JSON.stringify({
+            type: 'call_ice',
+            target_user_id: targetUserId,
+            candidate: event.candidate
+          }))
+        }
+      }
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') {
+          callStatus.value = 'connected'
+        }
+        if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+          callStatus.value = 'ended'
+        }
+      }
+
+      return pc
+    }
+
+    const flushPendingIceCandidates = async () => {
+      if (!peerConnection.value || !pendingIceCandidates.value.length) return
+
+      const candidates = [...pendingIceCandidates.value]
+      pendingIceCandidates.value = []
+
+      for (const candidate of candidates) {
+        try {
+          await peerConnection.value.addIceCandidate(new RTCIceCandidate(candidate))
+        } catch (error) {
+          console.error('Error applying queued ICE candidate:', error)
+        }
+      }
+    }
+
+    const startCall = async (mode = 'audio') => {
       const targetUserId = getOtherUserId()
       if (!targetUserId) {
         alert('Звонки доступны только в личных чатах')
@@ -1028,32 +1319,14 @@ export default {
       }
 
       try {
-        localStream.value = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+        callMode.value = mode === 'video' ? 'video' : 'audio'
+        await createLocalStream(callMode.value === 'video')
         
-        peerConnection.value = new RTCPeerConnection({
-          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-        })
+        peerConnection.value = createPeerConnection(targetUserId)
 
         localStream.value.getTracks().forEach(track => {
           peerConnection.value.addTrack(track, localStream.value)
         })
-
-        peerConnection.value.ontrack = (event) => {
-          const audioEl = audioRef.value
-          if (audioEl && event.streams[0]) {
-            audioEl.srcObject = event.streams[0]
-          }
-        }
-
-        peerConnection.value.onicecandidate = (event) => {
-          if (event.candidate && ws.value?.ws) {
-            ws.value.ws.send(JSON.stringify({
-              type: 'call_ice',
-              target_user_id: targetUserId,
-              candidate: event.candidate
-            }))
-          }
-        }
 
         const offer = await peerConnection.value.createOffer()
         await peerConnection.value.setLocalDescription(offer)
@@ -1061,11 +1334,13 @@ export default {
         inCall.value = true
         callStatus.value = 'calling'
         remoteUser.value = { id: targetUserId }
+        await attachCallStreams()
 
         ws.value.ws.send(JSON.stringify({
           type: 'call_offer',
           target_user_id: targetUserId,
           chat_id: chatId,
+          call_mode: callMode.value,
           sdp: peerConnection.value.localDescription
         }))
 
@@ -1078,6 +1353,7 @@ export default {
 
     const handleIncomingCall = (data) => {
       console.log('Incoming call:', data)
+      callMode.value = data.call_mode === 'video' ? 'video' : 'audio'
       incomingCall.value = data
       // Play ringtone
       const ringtone = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2teleR4HLp3W6p97IRc2iNLrsYsdHDiMxemmVB8NNY3P6bJOHB08jMTrr1IcHD+L0OqxUB0fP4rP6bFSHSBCh87rsFEcIEEEAtLqsFAdIEGFAtLqsFAdIEEAAAAAA==')
@@ -1089,6 +1365,7 @@ export default {
 
     const acceptCall = async () => {
       const data = incomingCall.value
+      if (!data) return
       if (data.ringtone) {
         data.ringtone.pause()
         data.ringtone = null
@@ -1096,49 +1373,36 @@ export default {
       incomingCall.value = null
 
       try {
-        localStream.value = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+        callMode.value = data.call_mode === 'video' ? 'video' : 'audio'
+        inCall.value = true
+        callStatus.value = 'connecting'
+        remoteUser.value = { id: data.from_user_id, name: data.from_user_name }
+        await createLocalStream(callMode.value === 'video')
         
-        peerConnection.value = new RTCPeerConnection({
-          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-        })
+        peerConnection.value = createPeerConnection(data.from_user_id)
 
         localStream.value.getTracks().forEach(track => {
           peerConnection.value.addTrack(track, localStream.value)
         })
 
-        peerConnection.value.ontrack = (event) => {
-          const audioEl = audioRef.value
-          if (audioEl && event.streams[0]) {
-            audioEl.srcObject = event.streams[0]
-          }
-        }
-
-        peerConnection.value.onicecandidate = (event) => {
-          if (event.candidate && ws.value?.ws) {
-            ws.value.ws.send(JSON.stringify({
-              type: 'call_ice',
-              target_user_id: data.from_user_id,
-              candidate: event.candidate
-            }))
-          }
-        }
-
         await peerConnection.value.setRemoteDescription(new RTCSessionDescription(data.sdp))
         const answer = await peerConnection.value.createAnswer()
         await peerConnection.value.setLocalDescription(answer)
+        await flushPendingIceCandidates()
 
-        inCall.value = true
         callStatus.value = 'connected'
-        remoteUser.value = { id: data.from_user_id, name: data.from_user_name }
+        await attachCallStreams()
 
         ws.value.ws.send(JSON.stringify({
           type: 'call_answer',
           target_user_id: data.from_user_id,
           accepted: true,
+          call_mode: callMode.value,
           sdp: peerConnection.value.localDescription
         }))
       } catch (error) {
         console.error('Error accepting call:', error)
+        alert('Не удалось принять звонок: ' + (error.message || 'ошибка доступа к микрофону/камере'))
         endCall()
       }
     }
@@ -1166,34 +1430,21 @@ export default {
       if (!peerConnection.value) {
         console.log('No peer connection, initiating answerer side')
         try {
-          localStream.value = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+          callMode.value = data.call_mode === 'video' ? 'video' : 'audio'
+          inCall.value = true
+          callStatus.value = 'connecting'
+          await createLocalStream(callMode.value === 'video')
           
-          peerConnection.value = new RTCPeerConnection({
-            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-          })
+          peerConnection.value = createPeerConnection(data.from_user_id)
           
           localStream.value.getTracks().forEach(track => {
             peerConnection.value.addTrack(track, localStream.value)
           })
-          
-          peerConnection.value.ontrack = (event) => {
-            const audioEl = audioRef.value
-            if (audioEl && event.streams[0]) {
-              audioEl.srcObject = event.streams[0]
-            }
-          }
-          
-          peerConnection.value.onicecandidate = (event) => {
-            if (event.candidate && ws.value?.ws) {
-              ws.value.ws.send(JSON.stringify({
-                type: 'call_ice',
-                target_user_id: data.from_user_id,
-                candidate: event.candidate
-              }))
-            }
-          }
+          await attachCallStreams()
         } catch (err) {
           console.error('Error setting up peer connection:', err)
+          alert('Не удалось подготовить звонок: ' + (err.message || 'ошибка доступа к микрофону/камере'))
+          endCall()
           return
         }
       }
@@ -1201,6 +1452,7 @@ export default {
       try {
         if (data.accepted && data.sdp) {
           await peerConnection.value.setRemoteDescription(new RTCSessionDescription(data.sdp))
+          await flushPendingIceCandidates()
           callStatus.value = 'connected'
         } else {
           alert('Звонок отклонён')
@@ -1213,7 +1465,11 @@ export default {
     }
 
     const handleRemoteIce = async (data) => {
-      if (!peerConnection.value) return
+      if (!data.candidate) return
+      if (!peerConnection.value || !peerConnection.value.remoteDescription) {
+        pendingIceCandidates.value = [...pendingIceCandidates.value, data.candidate]
+        return
+      }
       try {
         await peerConnection.value.addIceCandidate(new RTCIceCandidate(data.candidate))
       } catch (error) {
@@ -1221,7 +1477,7 @@ export default {
       }
     }
 
-    const endCall = () => {
+    const endCall = (notifyRemote = true) => {
       if (localStream.value) {
         localStream.value.getTracks().forEach(track => track.stop())
         localStream.value = null
@@ -1232,7 +1488,7 @@ export default {
       }
       
       const targetId = remoteUser.value?.id || getOtherUserId()
-      if (targetId && ws.value?.ws) {
+      if (notifyRemote && targetId && ws.value?.ws) {
         ws.value.ws.send(JSON.stringify({
           type: 'call_end',
           target_user_id: targetId
@@ -1243,6 +1499,34 @@ export default {
       callStatus.value = ''
       remoteUser.value = null
       incomingCall.value = null
+      remoteStream.value = null
+      pendingIceCandidates.value = []
+      callMode.value = 'audio'
+      isMuted.value = false
+      isCameraOn.value = false
+      canToggleCamera.value = false
+      hasRemoteVideo.value = false
+      stopRecordingTimer()
+    }
+
+    const toggleMute = () => {
+      if (!localStream.value) return
+      localStream.value.getAudioTracks().forEach(track => {
+        track.enabled = !track.enabled
+        isMuted.value = !track.enabled
+      })
+    }
+
+    const toggleCamera = () => {
+      if (!localStream.value || !canToggleCamera.value) {
+        alert('Камера недоступна на этом устройстве или не была разрешена.')
+        return
+      }
+      localStream.value.getVideoTracks().forEach(track => {
+        track.enabled = !track.enabled
+        isCameraOn.value = track.enabled
+      })
+      attachCallStreams()
     }
 
     const handleMemberSearch = async () => {
@@ -1440,6 +1724,10 @@ export default {
       }
       if (typingTimeout) clearTimeout(typingTimeout)
       if (pollInterval) clearInterval(pollInterval)
+      if (mediaRecorder.value && mediaRecorder.value.state !== 'inactive') {
+        mediaRecorder.value.stop()
+      }
+      stopRecordingTimer()
       endCall()
     })
 
@@ -1467,6 +1755,12 @@ export default {
         scrollToBottom()
       }
     }, { deep: true })
+
+    watch(showsVideoStage, (visible) => {
+      if (visible) {
+        attachCallStreams()
+      }
+    })
 
     return {
       messages,
@@ -1524,6 +1818,7 @@ export default {
 deleteMessage,
       toggleRole,
       sendToAI,
+      sendAIChat,
       showAIModal,
       aiEditText,
       aiEditPrompt,
@@ -1538,6 +1833,29 @@ deleteMessage,
       isUserOnline,
       onlineUsers,
       typingUser,
+      isRecording,
+      recordingTime,
+      toggleVoiceRecording,
+      startCall,
+      acceptCall,
+      declineCall,
+      endCall,
+      toggleMute,
+      toggleCamera,
+      inCall,
+      callStatus,
+      callMode,
+      showsVideoStage,
+      canToggleCamera,
+      remoteUser,
+      incomingCall,
+      audioRef,
+      localVideoRef,
+      remoteVideoRef,
+      isMuted,
+      isCameraOn,
+      getCallInitials,
+      openMediaModal,
     }
   },
 }
@@ -2421,13 +2739,14 @@ deleteMessage,
 }
 
 .drawing-control input[type="color"] {
-  width: 44px;
-  height: 36px;
-  padding: 0;
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  width: 52px;
+  height: 40px;
+  padding: 0.2rem;
+  background: #ffffff;
+  border: 1px solid rgba(124, 58, 237, 0.18);
+  border-radius: 12px;
   cursor: pointer;
+  box-shadow: 0 10px 22px rgba(124, 58, 237, 0.08);
 }
 
 .drawing-size-control {
@@ -2437,12 +2756,56 @@ deleteMessage,
 .drawing-size-control input[type="range"] {
   flex: 1;
   min-width: 140px;
+  accent-color: var(--primary-purple);
 }
 
 .drawing-size-value {
-  min-width: 2rem;
-  color: var(--text-primary);
+  min-width: 2.4rem;
+  padding: 0.35rem 0.55rem;
+  color: var(--primary-purple-dark);
   text-align: right;
+  border-radius: 999px;
+  background: rgba(124, 58, 237, 0.1);
+  font-weight: 600;
+}
+
+.drawing-action-btn {
+  min-height: 2.75rem;
+  padding: 0.72rem 1.1rem;
+  border: 1px solid rgba(124, 58, 237, 0.14);
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: 0.01em;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.drawing-action-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 22px rgba(124, 58, 237, 0.12);
+}
+
+.drawing-clear-btn,
+.drawing-cancel-btn {
+  background: rgba(124, 58, 237, 0.08);
+  color: var(--primary-purple-dark);
+}
+
+.drawing-clear-btn:hover,
+.drawing-cancel-btn:hover {
+  border-color: rgba(124, 58, 237, 0.24);
+  background: rgba(124, 58, 237, 0.14);
+}
+
+.drawing-attach-btn {
+  background: linear-gradient(135deg, var(--primary-purple), var(--primary-purple-light));
+  color: #ffffff;
+  box-shadow: 0 14px 28px rgba(124, 58, 237, 0.24);
+}
+
+.drawing-attach-btn:hover {
+  border-color: rgba(124, 58, 237, 0.32);
 }
 
 .drawing-canvas {
@@ -2890,5 +3253,612 @@ deleteMessage,
 .ai-hint {
   color: var(--text-secondary);
   margin-bottom: 16px;
+}
+
+/* Telegram-like chat polish */
+.chat-container {
+  max-width: none;
+  --chat-page-bg:
+    radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--primary-purple) 10%, transparent), transparent 28%),
+    var(--page-gradient);
+  --chat-header-bg: color-mix(in srgb, var(--bg-card) 92%, transparent);
+  --chat-header-border: var(--border-color);
+  --chat-action-color: var(--text-secondary);
+  --chat-action-hover-bg: var(--bg-card-hover);
+  --chat-title-color: var(--text-primary);
+  --chat-thread-bg:
+    linear-gradient(color-mix(in srgb, var(--bg-card) 24%, transparent), color-mix(in srgb, var(--bg-card) 24%, transparent)),
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--primary-purple) 8%, transparent) 0 2px, transparent 2px 34px),
+    var(--bg-dark);
+  --chat-bubble-bg: var(--bg-card);
+  --chat-own-bubble-bg: color-mix(in srgb, var(--success) 18%, var(--bg-card));
+  --chat-bubble-shadow: var(--shadow-soft);
+  --chat-message-text: var(--text-primary);
+  --chat-sender-color: var(--primary-purple-dark);
+  --chat-own-sender-color: var(--success);
+  --chat-meta-color: var(--text-muted);
+  --chat-input-bg: var(--bg-input);
+  --chat-panel-bg: color-mix(in srgb, var(--bg-card) 90%, transparent);
+  --chat-soft-control-bg: var(--bg-card);
+  background: var(--chat-page-bg);
+}
+
+:global([data-theme='dark']) .chat-container {
+  --chat-bubble-shadow: 0 1px 2px rgba(0, 0, 0, 0.34);
+  --chat-own-bubble-bg: color-mix(in srgb, var(--success) 20%, var(--bg-elevated));
+}
+
+.chat-header {
+  height: 64px;
+  padding: 0.625rem 1rem;
+  background: var(--chat-header-bg);
+  border-bottom: 1px solid var(--chat-header-border);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(18px);
+}
+
+.back-btn,
+.members-btn,
+.settings-btn,
+.call-btn,
+.add-members-btn {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--chat-action-color);
+  box-shadow: none;
+}
+
+.back-btn {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.call-btn,
+.members-btn,
+.settings-btn {
+  font-size: 1.2rem;
+}
+
+.back-btn:hover,
+.members-btn:hover,
+.settings-btn:hover,
+.call-btn:hover,
+.add-members-btn:hover {
+  background: var(--chat-action-hover-bg);
+  color: var(--primary-purple-dark);
+  transform: none;
+  box-shadow: none;
+}
+
+.chat-title {
+  min-width: 0;
+}
+
+.chat-title h2 {
+  max-width: 44vw;
+  margin: 0 auto;
+  color: var(--chat-title-color);
+  font-size: 1.05rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-actions {
+  gap: 0.25rem;
+}
+
+.chat-content,
+.messages-container {
+  background: var(--chat-thread-bg);
+}
+
+.messages-container {
+  padding: 1rem max(1rem, calc((100vw - 920px) / 2));
+}
+
+.message {
+  position: relative;
+  max-width: min(680px, 74%);
+  margin-bottom: 0.45rem;
+  padding: 0;
+  gap: 0.5rem;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.message:hover {
+  border-color: transparent;
+}
+
+.message-body {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.45rem 0.7rem 0.38rem;
+  background: var(--chat-bubble-bg);
+  border-radius: 8px 18px 18px 18px;
+  box-shadow: var(--chat-bubble-shadow);
+}
+
+.own-message .message-body {
+  margin-left: auto;
+  background: var(--chat-own-bubble-bg);
+  border-radius: 18px 8px 18px 18px;
+}
+
+.own-message {
+  background: transparent;
+  box-shadow: none;
+}
+
+.message-avatar,
+.message-avatar-placeholder {
+  width: 34px;
+  height: 34px;
+  border: none;
+  box-shadow: var(--chat-bubble-shadow);
+}
+
+.message-avatar-placeholder {
+  background: linear-gradient(135deg, #2ca5dc, #7acb8f);
+  font-size: 0.78rem;
+}
+
+.message-header {
+  gap: 0.75rem;
+  margin-bottom: 0.18rem;
+  line-height: 1.2;
+}
+
+.message-header strong {
+  color: var(--chat-sender-color);
+  font-size: 0.82rem;
+}
+
+.own-message .message-header strong {
+  color: var(--chat-own-sender-color);
+}
+
+.message-content {
+  color: var(--chat-message-text);
+  font-size: 0.96rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
+.own-message .message-content {
+  color: var(--chat-message-text);
+}
+
+.message-time,
+.own-message .message-time,
+.read-status {
+  color: var(--chat-meta-color);
+  font-size: 0.7rem;
+  opacity: 1;
+}
+
+.read-status {
+  color: #2196d3;
+}
+
+.delete-btn {
+  width: 20px;
+  height: 20px;
+  color: #7d94a4;
+  border-radius: 50%;
+}
+
+.delete-btn:hover {
+  background: rgba(222, 62, 62, 0.12);
+}
+
+.input-container {
+  margin: 0 auto;
+  width: min(960px, 100%);
+  padding: 0.65rem 0.8rem 0.8rem;
+  background: transparent;
+  border-top: none;
+  box-shadow: none;
+}
+
+.input-container input {
+  min-height: 46px;
+  border: none;
+  border-radius: 23px;
+  padding: 0 1rem;
+  background: var(--chat-input-bg);
+  color: var(--text-primary);
+  box-shadow: var(--chat-bubble-shadow);
+}
+
+.input-container input:focus {
+  border-color: transparent;
+  background: var(--chat-input-bg);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-purple) 25%, transparent), var(--chat-bubble-shadow);
+}
+
+.attach-btn,
+.input-container .draw-btn,
+.input-container .voice-btn,
+.input-container .ai-btn,
+.input-container .send-btn {
+  width: 46px;
+  height: 46px;
+  min-width: 46px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--chat-soft-control-bg);
+  color: var(--text-secondary);
+  box-shadow: var(--chat-bubble-shadow);
+}
+
+.input-container .send-btn {
+  background: var(--primary-purple);
+  color: #ffffff;
+}
+
+.input-container .voice-btn.recording {
+  background: #e84f4f;
+  color: #ffffff;
+  animation: none;
+}
+
+.attach-btn:hover,
+.input-container .draw-btn:hover,
+.input-container .voice-btn:hover,
+.input-container .ai-btn:hover,
+.input-container .send-btn:hover:not(:disabled) {
+  transform: none;
+  background: #f2ebff;
+  color: var(--primary-purple-dark);
+  box-shadow: 0 1px 4px rgba(49, 28, 86, 0.18);
+}
+
+.input-container .send-btn:hover:not(:disabled) {
+  background: var(--primary-purple-dark);
+  color: #ffffff;
+}
+
+.input-container .send-btn:disabled {
+  background: #d9cdf1;
+  color: #ffffff;
+  opacity: 1;
+}
+
+.send-text {
+  display: none;
+}
+
+.send-icon {
+  display: inline;
+}
+
+.file-preview,
+.recording-indicator,
+.typing-indicator {
+  width: min(936px, calc(100% - 1.6rem));
+  margin: 0.2rem auto 0;
+  border: none;
+  border-radius: 18px;
+  background: var(--chat-panel-bg);
+  color: var(--text-secondary);
+  box-shadow: var(--chat-bubble-shadow);
+}
+
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.35rem 1rem;
+  font-style: normal;
+}
+
+.typing-indicator i {
+  width: 4px;
+  height: 4px;
+  background: #8f7ab8;
+  border-radius: 50%;
+  animation: typingDot 1.2s infinite ease-in-out;
+}
+
+.typing-indicator i:nth-child(3) {
+  animation-delay: 0.15s;
+}
+
+.typing-indicator i:nth-child(4) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typingDot {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.45; }
+  40% { transform: translateY(-3px); opacity: 1; }
+}
+
+.message-media {
+  overflow: hidden;
+  margin: -0.12rem -0.38rem 0.38rem;
+}
+
+.media-image {
+  display: block;
+  width: min(360px, 62vw);
+  max-width: 100%;
+  max-height: 360px;
+  border-radius: 14px;
+  object-fit: cover;
+}
+
+.media-audio {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: min(330px, 64vw);
+  padding: 0.35rem 0.25rem;
+}
+
+.media-audio audio {
+  max-width: none;
+  width: 100%;
+  height: 34px;
+  margin: 0;
+}
+
+.voice-wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--primary-purple);
+}
+
+.voice-wave i {
+  width: 3px;
+  border-radius: 3px;
+  background: currentColor;
+}
+
+.voice-wave i:nth-child(1) { height: 12px; }
+.voice-wave i:nth-child(2) { height: 20px; }
+.voice-wave i:nth-child(3) { height: 15px; }
+.voice-wave i:nth-child(4) { height: 25px; }
+.voice-wave i:nth-child(5) { height: 10px; }
+
+.document-link {
+  border: none;
+  border-radius: 14px;
+  background: #f3ecff;
+  color: #342257;
+}
+
+.own-message .document-link {
+  background: rgba(255, 255, 255, 0.45);
+  color: #342257;
+}
+
+.modal-content {
+  border-radius: 14px;
+  background: #ffffff;
+  color: #10202e;
+  border: 1px solid #e2d6fb;
+  box-shadow: 0 20px 70px rgba(71, 38, 129, 0.18);
+}
+
+.drawing-modal {
+  max-width: 760px;
+}
+
+.drawing-toolbar {
+  background:
+    linear-gradient(180deg, rgba(246, 241, 255, 0.95), rgba(255, 255, 255, 0.96));
+  border-top-left-radius: 14px;
+  border-top-right-radius: 14px;
+}
+
+.drawing-canvas {
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px #e5d7ff;
+}
+
+.call-modal {
+  background:
+    radial-gradient(circle at 50% 20%, rgba(167, 139, 250, 0.45), transparent 35%),
+    linear-gradient(160deg, #2d1148 0%, #140624 100%);
+  backdrop-filter: blur(12px);
+}
+
+.call-content,
+.call-panel {
+  width: min(420px, calc(100vw - 2rem));
+  min-height: 420px;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  text-align: center;
+}
+
+.call-avatar {
+  width: 112px;
+  height: 112px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 1.2rem;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7c3aed, #c084fc);
+  color: white;
+  font-size: 2.4rem;
+  font-weight: 800;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+
+.call-user {
+  margin-bottom: 0.4rem;
+  font-size: 1.45rem;
+}
+
+.call-status {
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.call-actions,
+.call-controls {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  align-items: center;
+  margin-top: 2rem;
+}
+
+.accept-btn,
+.decline-btn,
+.end-call-btn,
+.call-control-btn {
+  width: 58px;
+  height: 58px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  color: white;
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+
+.accept-btn {
+  background: #26c46f;
+}
+
+.decline-btn,
+.end-call-btn {
+  background: #e34b4b;
+}
+
+.call-control-btn {
+  background: rgba(255,255,255,0.18);
+  backdrop-filter: blur(8px);
+}
+
+.call-control-btn.active {
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.video-stage {
+  position: relative;
+  width: min(860px, calc(100vw - 2rem));
+  height: min(620px, calc(100vh - 9rem));
+  min-height: 420px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: #05131e;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+}
+
+.call-panel.video-call {
+  width: auto;
+  min-height: auto;
+  padding: 1rem;
+}
+
+.remote-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #071d2d;
+}
+
+.local-video {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  width: min(190px, 32vw);
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border: 2px solid rgba(255,255,255,0.8);
+  border-radius: 14px;
+  background: #10202e;
+  box-shadow: 0 8px 26px rgba(0,0,0,0.32);
+}
+
+.video-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255,255,255,0.7);
+  font-size: 1.4rem;
+  pointer-events: none;
+}
+
+.call-panel.video-call .call-controls {
+  position: fixed;
+  left: 50%;
+  bottom: 2rem;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0.55rem;
+  border-radius: 999px;
+  background: rgba(6, 23, 36, 0.55);
+  backdrop-filter: blur(14px);
+}
+
+@media (max-width: 640px) {
+  .chat-header {
+    height: 58px;
+  }
+
+  .chat-title h2 {
+    max-width: 38vw;
+  }
+
+  .message {
+    max-width: 88%;
+  }
+
+  .avatar-wrapper {
+    display: none;
+  }
+
+  .messages-container {
+    padding: 0.75rem;
+  }
+
+  .input-container {
+    padding: 0.55rem;
+  }
+
+  .input-container .ai-btn {
+    display: none;
+  }
+
+  .media-image {
+    width: min(300px, 72vw);
+  }
+
+  .call-content,
+  .call-panel {
+    min-height: 360px;
+  }
+
+  .video-stage {
+    width: calc(100vw - 1rem);
+    height: calc(100vh - 8rem);
+    min-height: 360px;
+  }
 }
 </style>
