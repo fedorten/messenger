@@ -50,7 +50,7 @@ export default {
     const handleLogin = async () => {
       error.value = ''
       loading.value = true
-      
+
       try {
         const response = await authAPI.login(email.value, password.value)
         localStorage.setItem('access_token', response.access_token)
@@ -143,7 +143,7 @@ input {
   border-radius: 8px;
   font-size: 1rem;
   box-sizing: border-box;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   color: var(--text-primary);
   transition: all 0.3s ease;
 }
@@ -156,7 +156,7 @@ input:focus {
   outline: none;
   border-color: var(--primary-purple);
   box-shadow: 0 0 0 3px rgba(147, 51, 234, 0.1);
-  background: rgba(10, 10, 10, 0.7);
+  background: var(--bg-sunken);
 }
 
 button {
@@ -220,4 +220,3 @@ button:disabled {
   text-decoration: underline;
 }
 </style>
-

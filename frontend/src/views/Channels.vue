@@ -15,18 +15,23 @@
     <div v-else class="channels-list">
       <div v-for="channel in displayedChannels" :key="channel.id" class="channel-card" @click="openChannel(channel.id)">
         <div class="channel-avatar">
-          {{ getInitials(channel.name) }}
+          <img v-if="channel.avatar_url" :src="channel.avatar_url" :alt="channel.name" class="channel-avatar-img" />
+          <span v-else>{{ getInitials(channel.name) }}</span>
         </div>
         <div class="channel-info">
           <h3 class="channel-name">{{ channel.name }}</h3>
           <p class="channel-desc">{{ channel.description || 'Описание отсутствует' }}</p>
           <div class="channel-meta">
-            <span>Создатель: {{ channel.creator?.full_name || 'Неизвестно' }}</span>
+            <span class="channel-creator">
+              Создатель:
+              <UserAvatar :user="channel.creator" :size="20" :show-verified="false" />
+              <UserName :user="channel.creator" fallback="Неизвестно" />
+            </span>
             <span v-if="channel.is_admin" class="admin-badge">Админ</span>
           </div>
         </div>
       </div>
-      
+
       <div v-if="displayedChannels.length === 0" class="empty-state">
         Каналов пока нет
       </div>
@@ -67,9 +72,12 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { channelsAPI } from '../services/api'
+import UserAvatar from '../components/UserAvatar.vue'
+import UserName from '../components/UserName.vue'
 
 export default {
   name: 'Channels',
+  components: { UserAvatar, UserName },
   setup() {
     const router = useRouter()
     const channels = ref([])
@@ -181,7 +189,7 @@ export default {
 
 .back-btn, .create-btn {
   padding: 0.5rem 1rem;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-sunken);
   border: 1px solid var(--border-color, #333);
   border-radius: 8px;
   color: var(--text-primary, #eee);
@@ -235,6 +243,19 @@ export default {
 
 .channel-card:hover {
   border-color: var(--primary-purple, #9333ea);
+}
+
+.channel-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  object-fit: cover;
+}
+
+.channel-creator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .channel-avatar {

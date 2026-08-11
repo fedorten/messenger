@@ -1,22 +1,19 @@
-from datetime import datetime
-from typing import Optional
-
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import Session, select, and_
+from fastapi import APIRouter, HTTPException, Query
+from sqlmodel import Session, and_, select
 
 from app.api.deps import CurrentUser, SessionDep
+from app.api.serialization import build_user_public
 from app.models import (
     Channel,
-    ChannelAdmin,
-    ChannelPost,
-    ChannelCreate,
-    ChannelPostCreate,
     ChannelAddAdmin,
-    ChannelPublic,
+    ChannelAdmin,
+    ChannelCreate,
+    ChannelPost,
+    ChannelPostCreate,
     ChannelPostPublic,
-    ChannelsPublic,
     ChannelPostsPublic,
-    UserPublic,
+    ChannelPublic,
+    ChannelsPublic,
 )
 
 router = APIRouter(prefix="/channels", tags=["channels"])
@@ -47,7 +44,7 @@ def get_channels(
     """Получить все публичные каналы"""
     statement = (
         select(Channel)
-        .where(Channel.is_public == True)
+        .where(Channel.is_public)
         .order_by(Channel.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -61,20 +58,7 @@ def get_channels(
             ChannelPublic(
                 id=ch.id,
                 creator_id=ch.creator_id,
-                creator=UserPublic(
-                    id=ch.creator.id,
-                    email=ch.creator.email,
-                    full_name=ch.creator.full_name,
-                    is_active=ch.creator.is_active,
-                    is_superuser=ch.creator.is_superuser,
-                    avatar_url=ch.creator.avatar_url,
-                    balance=ch.creator.balance,
-                    is_banned=ch.creator.is_banned,
-                    ban_reason=ch.creator.ban_reason,
-                    timezone=ch.creator.timezone,
-                    last_seen=ch.creator.last_seen,
-                    is_online=False,
-                ),
+                creator=build_user_public(ch.creator, is_online=False),
                 name=ch.name,
                 description=ch.description,
                 avatar_url=ch.avatar_url,
@@ -112,20 +96,7 @@ def get_my_channels(
             ChannelPublic(
                 id=ch.id,
                 creator_id=ch.creator_id,
-                creator=UserPublic(
-                    id=ch.creator.id,
-                    email=ch.creator.email,
-                    full_name=ch.creator.full_name,
-                    is_active=ch.creator.is_active,
-                    is_superuser=ch.creator.is_superuser,
-                    avatar_url=ch.creator.avatar_url,
-                    balance=ch.creator.balance,
-                    is_banned=ch.creator.is_banned,
-                    ban_reason=ch.creator.ban_reason,
-                    timezone=ch.creator.timezone,
-                    last_seen=ch.creator.last_seen,
-                    is_online=False,
-                ),
+                creator=build_user_public(ch.creator, is_online=False),
                 name=ch.name,
                 description=ch.description,
                 avatar_url=ch.avatar_url,
@@ -151,20 +122,7 @@ def get_channel(channel_id: int, session: SessionDep, current_user: CurrentUser)
     return ChannelPublic(
         id=channel.id,
         creator_id=channel.creator_id,
-        creator=UserPublic(
-            id=channel.creator.id,
-            email=channel.creator.email,
-            full_name=channel.creator.full_name,
-            is_active=channel.creator.is_active,
-            is_superuser=channel.creator.is_superuser,
-            avatar_url=channel.creator.avatar_url,
-            balance=channel.creator.balance,
-            is_banned=channel.creator.is_banned,
-            ban_reason=channel.creator.ban_reason,
-            timezone=channel.creator.timezone,
-            last_seen=channel.creator.last_seen,
-            is_online=False,
-        ),
+        creator=build_user_public(channel.creator, is_online=False),
         name=channel.name,
         description=channel.description,
         avatar_url=channel.avatar_url,
@@ -196,20 +154,7 @@ def create_channel(
     return ChannelPublic(
         id=channel.id,
         creator_id=channel.creator_id,
-        creator=UserPublic(
-            id=current_user.id,
-            email=current_user.email,
-            full_name=current_user.full_name,
-            is_active=current_user.is_active,
-            is_superuser=current_user.is_superuser,
-            avatar_url=current_user.avatar_url,
-            balance=current_user.balance,
-            is_banned=current_user.is_banned,
-            ban_reason=current_user.ban_reason,
-            timezone=current_user.timezone,
-            last_seen=current_user.last_seen,
-            is_online=False,
-        ),
+        creator=build_user_public(current_user, is_online=False),
         name=channel.name,
         description=channel.description,
         avatar_url=channel.avatar_url,
@@ -259,20 +204,7 @@ def update_channel_avatar(
     return ChannelPublic(
         id=channel.id,
         creator_id=channel.creator_id,
-        creator=UserPublic(
-            id=channel.creator.id,
-            email=channel.creator.email,
-            full_name=channel.creator.full_name,
-            is_active=channel.creator.is_active,
-            is_superuser=channel.creator.is_superuser,
-            avatar_url=channel.creator.avatar_url,
-            balance=channel.creator.balance,
-            is_banned=channel.creator.is_banned,
-            ban_reason=channel.creator.ban_reason,
-            timezone=channel.creator.timezone,
-            last_seen=channel.creator.last_seen,
-            is_online=False,
-        ),
+        creator=build_user_public(channel.creator, is_online=False),
         name=channel.name,
         description=channel.description,
         avatar_url=channel.avatar_url,
@@ -326,20 +258,7 @@ def add_admin(
     return ChannelPublic(
         id=channel.id,
         creator_id=channel.creator_id,
-        creator=UserPublic(
-            id=channel.creator.id,
-            email=channel.creator.email,
-            full_name=channel.creator.full_name,
-            is_active=channel.creator.is_active,
-            is_superuser=channel.creator.is_superuser,
-            avatar_url=channel.creator.avatar_url,
-            balance=channel.creator.balance,
-            is_banned=channel.creator.is_banned,
-            ban_reason=channel.creator.ban_reason,
-            timezone=channel.creator.timezone,
-            last_seen=channel.creator.last_seen,
-            is_online=False,
-        ),
+        creator=build_user_public(channel.creator, is_online=False),
         name=channel.name,
         description=channel.description,
         avatar_url=channel.avatar_url,
@@ -381,20 +300,7 @@ def remove_admin(
     return ChannelPublic(
         id=channel.id,
         creator_id=channel.creator_id,
-        creator=UserPublic(
-            id=channel.creator.id,
-            email=channel.creator.email,
-            full_name=channel.creator.full_name,
-            is_active=channel.creator.is_active,
-            is_superuser=channel.creator.is_superuser,
-            avatar_url=channel.creator.avatar_url,
-            balance=channel.creator.balance,
-            is_banned=channel.creator.is_banned,
-            ban_reason=channel.creator.ban_reason,
-            timezone=channel.creator.timezone,
-            last_seen=channel.creator.last_seen,
-            is_online=False,
-        ),
+        creator=build_user_public(channel.creator, is_online=False),
         name=channel.name,
         description=channel.description,
         avatar_url=channel.avatar_url,
@@ -409,7 +315,7 @@ def remove_admin(
 def get_channel_posts(
     channel_id: int,
     session: SessionDep,
-    current_user: CurrentUser,
+    _current_user: CurrentUser,
     limit: int = Query(default=50, le=100),
     offset: int = Query(default=0, ge=0),
 ):
@@ -434,20 +340,7 @@ def get_channel_posts(
                 id=post.id,
                 channel_id=post.channel_id,
                 author_id=post.author_id,
-                author=UserPublic(
-                    id=post.author.id,
-                    email=post.author.email,
-                    full_name=post.author.full_name,
-                    is_active=post.author.is_active,
-                    is_superuser=post.author.is_superuser,
-                    avatar_url=post.author.avatar_url,
-                    balance=post.author.balance,
-                    is_banned=post.author.is_banned,
-                    ban_reason=post.author.ban_reason,
-                    timezone=post.author.timezone,
-                    last_seen=post.author.last_seen,
-                    is_online=False,
-                ),
+                author=build_user_public(post.author, is_online=False),
                 content=post.content,
                 media_type=post.media_type,
                 media_url=post.media_url,
@@ -490,20 +383,7 @@ def create_channel_post(
         id=post.id,
         channel_id=post.channel_id,
         author_id=post.author_id,
-        author=UserPublic(
-            id=current_user.id,
-            email=current_user.email,
-            full_name=current_user.full_name,
-            is_active=current_user.is_active,
-            is_superuser=current_user.is_superuser,
-            avatar_url=current_user.avatar_url,
-            balance=current_user.balance,
-            is_banned=current_user.is_banned,
-            ban_reason=current_user.ban_reason,
-            timezone=current_user.timezone,
-            last_seen=current_user.last_seen,
-            is_online=False,
-        ),
+        author=build_user_public(current_user, is_online=False),
         content=post.content,
         media_type=post.media_type,
         media_url=post.media_url,

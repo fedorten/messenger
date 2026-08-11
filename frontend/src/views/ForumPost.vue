@@ -8,21 +8,21 @@
     <div v-if="loading" class="loading">Загрузка...</div>
     <div v-else-if="post" class="post-content">
       <div class="post-author">
-        <div class="author-avatar">{{ getInitials(post.author) }}</div>
+        <UserAvatar :user="post.author" :size="48" />
         <div class="author-info">
-          <span class="author-name">{{ post.author?.full_name || 'Пользователь' }}</span>
-          <span class="post-date">{{ formatDate(post.created_at) }}</span>
+          <UserName :user="post.author" class="author-name" />
+          <span class="post-date">{{ formatDateTime(post.created_at) }}</span>
         </div>
       </div>
-      
+
       <h1 class="post-title">{{ post.title }}</h1>
       <p class="post-text">{{ post.content }}</p>
-      
+
       <div v-if="post.media_url" class="post-media">
         <img v-if="post.media_type === 'image'" :src="post.media_url" alt="Media" />
         <video v-else-if="post.media_type === 'video'" :src="post.media_url" controls />
       </div>
-      
+
       <div class="post-actions">
         <button @click="likePost" class="action-btn">❤️ {{ post.likes_count }}</button>
       </div>
@@ -30,7 +30,7 @@
       <!-- Comments section -->
       <div class="comments-section">
         <h3>Комментарии ({{ comments.length }})</h3>
-        
+
         <div class="comment-form">
           <textarea v-model="newComment" placeholder="Написать комментарий..." class="input" rows="3"></textarea>
           <button @click="addComment" :disabled="!newComment.trim()" class="btn-primary">Отправить</button>
@@ -39,14 +39,14 @@
         <div class="comments-list">
           <div v-for="comment in comments" :key="comment.id" class="comment">
             <div class="comment-author">
-              <div class="author-avatar small">{{ getInitials(comment.author) }}</div>
-              <span class="author-name">{{ comment.author?.full_name || 'Пользователь' }}</span>
-              <span class="comment-date">{{ formatDate(comment.created_at) }}</span>
+              <UserAvatar :user="comment.author" :size="32" />
+              <UserName :user="comment.author" class="author-name" />
+              <span class="comment-date">{{ formatDateTime(comment.created_at) }}</span>
             </div>
             <p class="comment-text">{{ comment.content }}</p>
             <button v-if="canModerateComment(comment)" @click="deleteComment(comment.id)" class="delete-comment-btn">×</button>
           </div>
-          
+
           <div v-if="comments.length === 0" class="empty-comments">
             Пока нет комментариев. Будь первым!
           </div>
@@ -61,9 +61,13 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { forumAPI, authAPI } from '../services/api'
+import { formatDateTime } from '../services/datetime'
+import UserAvatar from '../components/UserAvatar.vue'
+import UserName from '../components/UserName.vue'
 
 export default {
   name: 'ForumPost',
+  components: { UserAvatar, UserName },
   setup() {
     const route = useRoute()
     const router = useRouter()
@@ -82,10 +86,10 @@ export default {
         const user = await authAPI.getCurrentUser()
         currentUserId.value = user.id
         isSuperuser.value = Boolean(user.is_superuser)
-        
+
         const postRes = await forumAPI.getPost(route.params.postId)
         post.value = postRes
-        
+
         const commentsRes = await forumAPI.getComments(route.params.postId)
         comments.value = commentsRes.data || []
       } catch (e) {
@@ -146,16 +150,6 @@ export default {
       router.push('/forum')
     }
 
-    const getInitials = (user) => {
-      if (!user?.full_name) return '?'
-      return user.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-    }
-
-    const formatDate = (dateStr) => {
-      const date = new Date(dateStr)
-      return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-    }
-
     onMounted(loadPost)
 
     return {
@@ -172,8 +166,7 @@ export default {
       canModerateComment,
       deletePost,
       goBack,
-      getInitials,
-      formatDate,
+      formatDateTime,
     }
   },
 }
@@ -199,7 +192,7 @@ export default {
 
 .back-btn, .delete-btn {
   padding: 0.5rem 1rem;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-sunken);
   border: 1px solid var(--border-color, #333);
   border-radius: 8px;
   color: var(--text-primary, #eee);
@@ -220,23 +213,6 @@ export default {
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 1.5rem;
-}
-
-.author-avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--primary-purple, #9333ea), var(--primary-purple-light, #a855f7));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-}
-
-.author-avatar.small {
-  width: 32px;
-  height: 32px;
-  font-size: 0.8rem;
 }
 
 .author-info {
