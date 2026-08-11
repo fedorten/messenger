@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlmodel import Session, select
@@ -112,8 +113,12 @@ class ConnectionManager:
         return user_id in self.user_connections
 
     async def notify_chat_members(
-        self, message: dict, chat_id: int, user_ids: list[int], exclude_user: int
-    ):
+        self,
+        message: dict[str, Any],
+        chat_id: int,
+        user_ids: list[int],
+        exclude_user: int | None,
+    ) -> None:
         """Отправить событие для пуш-уведомлений всем участникам чата, кроме автора.
 
         В отличие от broadcast_to_chat, доходит и до тех, кто открыл другую страницу
