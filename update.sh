@@ -1,38 +1,34 @@
 #!/bin/bash
 
-# Quick update script - updates code and redeploys
-# Usage: ./update.sh
+# Быстрое обновление: подтянуть код и переразвернуть (без Docker)
+# Использование: ./update.sh
 
 set -e
 
-echo "🔄 Starting update..."
-
-# Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Check if we're in the right directory
-if [ ! -f "docker-compose.prod.yml" ]; then
-    echo "❌ Error: docker-compose.prod.yml not found!"
-    echo "Please run this script from the project root directory."
+echo "🔄 Обновление..."
+
+if [ ! -f "deploy.sh" ]; then
+    echo "❌ Запустите скрипт из корня проекта (нет deploy.sh)"
     exit 1
 fi
 
-# Ask user if they want to pull from git
+# База данных и загруженные файлы живут вне git (backend/app.db в .gitignore),
+# поэтому git pull их не перезаписывает.
 if [ -d ".git" ]; then
-    read -p "Pull latest changes from Git? (y/n) " -n 1 -r
+    read -p "Подтянуть изменения из Git? (y/n) " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo -e "${BLUE}📥 Pulling latest changes from Git...${NC}"
+        echo -e "${BLUE}📥 git pull...${NC}"
         git pull
     fi
 fi
 
-# Run deploy script
-echo -e "${YELLOW}🚀 Redeploying...${NC}"
+echo -e "${YELLOW}🚀 Переразвёртывание...${NC}"
 ./deploy.sh
 
-echo -e "${GREEN}✅ Update completed!${NC}"
-
+echo -e "${GREEN}✅ Готово${NC}"

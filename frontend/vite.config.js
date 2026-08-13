@@ -8,8 +8,8 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     allowedHosts: [
-      'paerser2.ru',
-      'www.paerser2.ru',
+      'fusionmessenger.ru',
+      'www.fusionmessenger.ru',
       'localhost',
       '127.0.0.1'
     ],
