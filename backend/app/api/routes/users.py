@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
+from zoneinfo import available_timezones
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
@@ -42,6 +43,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/users", tags=["users"])
 
 
+@router.get(
+    "/all",
+    dependencies=[Depends(get_current_active_superuser)],
+    response_model=UsersPublic,
+)
+def get_all_users(
+    session: SessionDep,
+    skip: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+) -> Any:
+    """Получить всех пользователей (для админа)"""
+    count_statement = select(func.count()).select_from(User)
+    count = session.exec(count_statement).one()
+    statement = select(User).offset(skip).limit(limit)
+    users = session.exec(statement).all()
+    return UsersPublic(data=[build_user_public(user) for user in users], count=count)
+
+
 @router.get("/search", response_model=UsersPublic)
 def search_users(
     query: str, session: SessionDep, current_user: CurrentUser, limit: int = 20
@@ -65,15 +84,9 @@ def get_leaderboard(
 ) -> Any:
     """Получить топ пользователей по балансу"""
     users = session.exec(
-        select(User)
-        .where(User.is_active)
-        .order_by(User.balance.desc())
-        .limit(limit)
+        select(User).where(User.is_active).order_by(User.balance.desc()).limit(limit)
     ).all()
-    return [
-        build_user_public(user, is_online=False)
-        for user in users
-    ]
+    return [build_user_public(user, is_online=False) for user in users]
 
 
 @router.get(
@@ -145,25 +158,27 @@ def update_user_me(
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
-    return current_user
+    return build_user_public(current_user)
 
 
 class UpdateTimezone(BaseModel):
     timezone: str
 
 
-@router.post("/me/timezone", response_model=UserPublic)
+@router.api_route("/me/timezone", methods=["POST", "PATCH"], response_model=UserPublic)
 def update_timezone(
     session: SessionDep,
     current_user: CurrentUser,
     tz_data: UpdateTimezone,
 ) -> Any:
     """Обновить часовой пояс"""
+    if tz_data.timezone not in available_timezones():
+        raise HTTPException(status_code=422, detail="Unknown timezone")
     current_user.timezone = tz_data.timezone
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
-    return current_user
+    return build_user_public(current_user)
 
 
 @router.patch("/me/password", response_model=Message)
@@ -656,24 +671,6 @@ def unban_user(
     return Message(message=f"User {user.email} has been unbanned")
 
 
-@router.get(
-    "/all",
-    dependencies=[Depends(get_current_active_superuser)],
-    response_model=UsersPublic,
-)
-def get_all_users(
-    session: SessionDep,
-    skip: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
-) -> Any:
-    """Получить всех пользователей (для админа)"""
-    count_statement = select(func.count()).select_from(User)
-    count = session.exec(count_statement).one()
-    statement = select(User).offset(skip).limit(limit)
-    users = session.exec(statement).all()
-    return UsersPublic(data=[build_user_public(user) for user in users], count=count)
-
-
 @router.post(
     "/{user_id}/award-nft", dependencies=[Depends(get_current_active_superuser)]
 )
@@ -719,7 +716,9 @@ def award_nft(
 
 
 @router.post(
-    "/{user_id}/add-balance", dependencies=[Depends(get_current_active_superuser)]
+    "/{user_id}/add-balance",
+    dependencies=[Depends(get_current_active_superuser)],
+    response_model=UserPublic,
 )
 def admin_add_balance(
     user_id: int,
@@ -741,10 +740,14 @@ def admin_add_balance(
     session.commit()
     session.refresh(user)
 
-    return user
+    return build_user_public(user)
 
 
-@router.post("/{user_id}/verify", dependencies=[Depends(get_current_active_superuser)])
+@router.post(
+    "/{user_id}/verify",
+    dependencies=[Depends(get_current_active_superuser)],
+    response_model=UserPublic,
+)
 def verify_user(
     user_id: int,
     session: SessionDep,
@@ -760,16 +763,13 @@ def verify_user(
     session.commit()
     session.refresh(user)
 
-    return {
-        "id": user.id,
-        "email": user.email,
-        "full_name": user.full_name,
-        "is_verified": user.is_verified,
-    }
+    return build_user_public(user)
 
 
 @router.post(
-    "/{user_id}/unverify", dependencies=[Depends(get_current_active_superuser)]
+    "/{user_id}/unverify",
+    dependencies=[Depends(get_current_active_superuser)],
+    response_model=UserPublic,
 )
 def unverify_user(
     user_id: int,
@@ -786,9 +786,4 @@ def unverify_user(
     session.commit()
     session.refresh(user)
 
-    return {
-        "id": user.id,
-        "email": user.email,
-        "full_name": user.full_name,
-        "is_verified": user.is_verified,
-    }
+    return build_user_public(user)

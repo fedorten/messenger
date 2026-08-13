@@ -47,7 +47,7 @@ export const authAPI = {
     })
     return response.data
   },
-  
+
   register: async (email, password, fullName) => {
     const response = await api.post('/users/signup', {
       email,
@@ -56,50 +56,49 @@ export const authAPI = {
     })
     return response.data
   },
-  
+
   getCurrentUser: async () => {
     const response = await api.get('/users/me')
     return response.data
   },
-  
+
+  updateProfile: async (data) => {
+    const response = await api.patch('/users/me', data)
+    return response.data
+  },
+
   uploadAvatar: async (file) => {
     const formData = new FormData()
     formData.append('file', file)
-    const response = await axios.post(`${API_BASE_URL}/users/me/avatar`, formData, {
+    const response = await api.post('/users/me/avatar', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
     return response.data
   },
-  
+
   deleteAvatar: async () => {
-    const response = await axios.delete(`${API_BASE_URL}/users/me/avatar`)
+    const response = await api.delete('/users/me/avatar')
     return response.data
   },
-  
+
   updateTimezone: async (timezone) => {
-    const response = await axios.patch(`${API_BASE_URL}/users/me/timezone`, { timezone }, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-    })
+    const response = await api.patch('/users/me/timezone', { timezone })
     return response.data
   },
-  
+
   transferShekels: async (recipientId, amount) => {
-    const response = await axios.post(`${API_BASE_URL}/users/me/transfer`, {
+    const response = await api.post('/users/me/transfer', {
       recipient_id: recipientId,
       amount: amount
-    }, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
     })
     return response.data
   },
-  
+
   addBalance: async (amount) => {
-    const response = await axios.post(`${API_BASE_URL}/users/me/add-balance`, { amount }, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-    })
+    const response = await api.post('/users/me/add-balance', { amount })
     return response.data
   },
-  
+
   deleteAccount: async () => {
     const response = await api.delete('/users/me')
     return response.data
@@ -111,22 +110,22 @@ export const usersAPI = {
     const response = await api.get('/users/search', { params: { query } })
     return response.data
   },
-  
+
   getAll: async (skip = 0, limit = 100) => {
     const response = await api.get('/users/all', { params: { skip, limit } })
     return response.data
   },
-  
+
   banUser: async (userId, reason = null) => {
     const response = await api.post(`/users/${userId}/ban`, reason ? { reason } : {})
     return response.data
   },
-  
+
   unbanUser: async (userId) => {
     const response = await api.post(`/users/${userId}/unban`)
     return response.data
   },
-  
+
   deleteUser: async (userId) => {
     const response = await api.delete(`/users/${userId}`)
     return response.data
@@ -141,7 +140,7 @@ export const usersAPI = {
     const response = await api.post(`/users/${userId}/verify`)
     return response.data
   },
-  
+
   unverifyUser: async (userId) => {
     const response = await api.post(`/users/${userId}/unverify`)
     return response.data
@@ -153,17 +152,17 @@ export const chatsAPI = {
     const response = await api.get('/chats/')
     return response.data
   },
-  
+
   getChat: async (chatId) => {
     const response = await api.get(`/chats/${chatId}`)
     return response.data
   },
-  
+
   createPrivateChat: async (userId) => {
     const response = await api.post(`/chats/private/${userId}`)
     return response.data
   },
-  
+
   createGroupChat: async (name, memberIds) => {
     const response = await api.post('/chats/group', {
       chat_type: 'group',
@@ -172,7 +171,7 @@ export const chatsAPI = {
     })
     return response.data
   },
-  
+
   createChannel: async (name) => {
     const response = await api.post('/chats/group', {
       chat_type: 'channel',
@@ -180,41 +179,41 @@ export const chatsAPI = {
     })
     return response.data
   },
-  
+
   addMembersToGroup: async (chatId, memberIds) => {
     const response = await api.post(`/chats/${chatId}/members`, {
       member_ids: memberIds,
     })
     return response.data
   },
-  
+
 getMessages: async (chatId, skip = 0, limit = 50) => {
     const response = await api.get(`/chats/${chatId}/messages`, {
       params: { skip, limit },
     })
     return response.data
   },
-  
+
   markAsRead: async (chatId) => {
     const response = await api.post(`/messages/${chatId}/read`)
     return response.data
   },
-   
+
   updateMemberRole: async (chatId, memberId, role) => {
     const response = await api.patch(`/chats/${chatId}/members/${memberId}/role`, { role })
     return response.data
   },
-  
+
   removeMember: async (chatId, memberId) => {
     const response = await api.delete(`/chats/${chatId}/members/${memberId}`)
     return response.data
   },
-  
+
   leaveChat: async (chatId) => {
     const response = await api.post(`/chats/${chatId}/leave`)
     return response.data
   },
-  
+
   updateChatName: async (chatId, name) => {
     const response = await api.patch(`/chats/${chatId}/name`, { name })
     return response.data
@@ -235,7 +234,7 @@ export const messagesAPI = {
     const response = await api.post(`/media/${chatId}`, payload)
     return response.data
   },
-  
+
   uploadMedia: async (file) => {
     console.log('messagesAPI.uploadMedia called:', file.name, file.type, file.size)
     const formData = new FormData()
@@ -246,12 +245,12 @@ export const messagesAPI = {
     console.log('Upload response:', response.data)
     return response.data
   },
-  
+
   deleteMessage: async (messageId) => {
     const response = await api.delete(`/messages/${messageId}`)
     return response.data
   },
-  
+
   chatWithAI: async (message) => {
     const response = await api.post('/messages/ai/chat', { message })
     return response.data
@@ -263,12 +262,12 @@ export const nftAPI = {
     const response = await api.get('/users/shop')
     return response.data
   },
-  
+
   getUserNFTs: async () => {
     const response = await api.get('/users/me/nfts')
     return response.data
   },
-  
+
   buyNFT: async (itemId) => {
     const response = await api.post('/users/me/buy', { item_id: itemId })
     return response.data
@@ -280,42 +279,42 @@ export const botsAPI = {
     const response = await api.get('/bots/')
     return response.data
   },
-  
+
   getAllBots: async () => {
     const response = await api.get('/bots/all')
     return response.data
   },
-  
+
   searchBots: async (query) => {
     const response = await api.get('/bots/search', { params: { q: query } })
     return response.data
   },
-  
+
   getBot: async (botId) => {
     const response = await api.get(`/bots/${botId}`)
     return response.data
   },
-  
+
   createBot: async (botData) => {
     const response = await api.post('/bots/', botData)
     return response.data
   },
-  
+
   updateBot: async (botId, botData) => {
     const response = await api.patch(`/bots/${botId}`, botData)
     return response.data
   },
-  
+
   deleteBot: async (botId) => {
     const response = await api.delete(`/bots/${botId}`)
     return response.data
   },
-  
+
   testBot: async (botId, message) => {
     const response = await api.post(`/bots/${botId}/test?test_message=${encodeURIComponent(message)}`)
     return response.data
   },
-  
+
   chatWithBot: async (botId, message) => {
     const response = await api.post(`/bots/chat/${botId}`, { message })
     return response.data
@@ -451,9 +450,9 @@ export const ultraAPI = {
   },
 
   setProfileStyle: async (profileColor, avatarStyle) => {
-    const response = await api.post('/ultra/profile-style', { 
-      profile_color: profileColor, 
-      avatar_style: avatarStyle 
+    const response = await api.post('/ultra/profile-style', {
+      profile_color: profileColor,
+      avatar_style: avatarStyle
     })
     return response.data
   },
@@ -476,4 +475,3 @@ export const ultraAPI = {
 
 export { api }
 export default api
-

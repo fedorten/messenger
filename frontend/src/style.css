@@ -5,21 +5,53 @@
   box-sizing: border-box;
 }
 
-:root {
-  --primary-purple: #9333ea;
-  --primary-purple-dark: #7c3aed;
-  --primary-purple-light: #a855f7;
+/* Тёмная тема (по умолчанию) */
+:root,
+[data-theme='dark'] {
+  --primary-purple: #a855f7;
+  --primary-purple-dark: #c084fc;
+  --primary-purple-light: #d8b4fe;
   --bg-dark: #0a0a0a;
   --bg-darker: #000000;
   --bg-card: #1a1a1a;
   --bg-card-hover: #252525;
+  --bg-elevated: #202020;
+  --bg-input: #141414;
+  --bg-sunken: rgba(255, 255, 255, 0.06);
   --text-primary: #ffffff;
-  --text-secondary: #a0a0a0;
-  --text-muted: #666666;
-  --border-color: #333333;
-  --success: #10b981;
-  --error: #ef4444;
-  --warning: #f59e0b;
+  --text-secondary: #cbcbcb;
+  --text-muted: #9c9c9c;
+  --border-color: #3d3d3d;
+  --success: #34d399;
+  --error: #f87171;
+  --warning: #fbbf24;
+  --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.45);
+  --page-gradient: linear-gradient(160deg, #101014 0%, #0a0a0a 100%);
+  color-scheme: dark;
+}
+
+/* Светлая тема */
+[data-theme='light'] {
+  --primary-purple: #7e22ce;
+  --primary-purple-dark: #6b21a8;
+  --primary-purple-light: #9333ea;
+  --bg-dark: #f3f1f8;
+  --bg-darker: #e7e3f0;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1ecfa;
+  --bg-elevated: #ffffff;
+  --bg-input: #ffffff;
+  --bg-sunken: rgba(20, 16, 32, 0.05);
+  --text-primary: #14121c;
+  --text-secondary: #45415a;
+  --text-muted: #5c5872;
+  --border-color: #d3cce4;
+  --success: #047857;
+  --error: #b91c1c;
+  --warning: #a16207;
+  --shadow-soft: 0 1px 3px rgba(32, 22, 58, 0.14);
+  --page-gradient: linear-gradient(160deg, #f7f5fc 0%, #eee9f8 100%);
+  color-scheme: light;
 }
 
 body {
@@ -36,4 +68,31 @@ body {
 #app {
   min-height: 100vh;
   background: var(--bg-dark);
+  color: var(--text-primary);
+}
+
+/* Элементы форм наследуют цвета темы, иначе браузер рисует их светлыми */
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+  color: var(--text-primary);
+}
+
+input,
+textarea,
+select {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+}
+
+option {
+  background: var(--bg-card);
+  color: var(--text-primary);
 }

@@ -10,7 +10,7 @@
     <div v-else class="profile-content">
       <div class="profile-card">
         <h2>Информация о пользователе</h2>
-        
+
         <div class="avatar-section">
           <div class="avatar-wrapper" @click="triggerAvatarUpload">
             <img v-if="user.avatar_url" :src="user.avatar_url" alt="Avatar" class="avatar-img" />
@@ -21,12 +21,12 @@
               <span>📷</span>
             </div>
           </div>
-          <input 
-            ref="avatarInput" 
-            type="file" 
-            accept="image/*" 
-            @change="handleAvatarChange" 
-            hidden 
+          <input
+            ref="avatarInput"
+            type="file"
+            accept="image/*"
+            @change="handleAvatarChange"
+            hidden
           />
           <button v-if="user.avatar_url" @click="handleAvatarDelete" class="remove-avatar-btn">
             Удалить аватарку
@@ -42,9 +42,9 @@
             <label>Имя:</label>
             <div class="edit-field">
               <span v-if="!editingName">{{ user.full_name || 'Не указано' }}</span>
-              <input 
-                v-else 
-                v-model="editedName" 
+              <input
+                v-else
+                v-model="editedName"
                 class="name-input"
                 maxlength="100"
               />
@@ -58,17 +58,9 @@
           <div class="info-item">
             <label>Часовой пояс:</label>
             <div class="edit-field">
-              <span v-if="!editingTimezone">{{ user.timezone || 'UTC' }}</span>
+              <span v-if="!editingTimezone">{{ user.timezone || 'UTC' }} — {{ currentTimeInTimezone }}</span>
               <select v-else v-model="editedTimezone" class="timezone-select">
-                <option value="UTC">UTC</option>
-                <option value="Europe/Moscow">Москва (UTC+3)</option>
-                <option value="Europe/Kiev">Киев (UTC+2)</option>
-                <option value="Europe/Minsk">Минск (UTC+3)</option>
-                <option value="Europe/London">Лондон (UTC+0)</option>
-                <option value="Europe/Paris">Париж (UTC+1)</option>
-                <option value="America/New_York">Нью-Йорк (UTC-5)</option>
-                <option value="America/Los_Angeles">Лос-Анджелес (UTC-8)</option>
-                <option value="Asia/Tokyo">Токио (UTC+9)</option>
+                <option v-for="tz in timezoneOptions" :key="tz" :value="tz">{{ tz }}</option>
               </select>
               <button v-if="!editingTimezone" @click="startEditTimezone" class="edit-btn">✏️</button>
               <div v-else class="edit-actions">
@@ -76,6 +68,23 @@
                 <button @click="cancelEditTimezone" class="cancel-btn">✕</button>
               </div>
             </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>⚙️ Настройки</h3>
+          <div class="setting-row">
+            <span>Тема</span>
+            <button @click="toggleTheme" class="setting-btn">
+              {{ theme === 'dark' ? '🌙 Тёмная' : '☀️ Светлая' }}
+            </button>
+          </div>
+          <div class="setting-row">
+            <span>Пуш-уведомления</span>
+            <button v-if="notificationsSupported" @click="toggleNotifications" class="setting-btn">
+              {{ notificationsEnabled ? '🔔 Включены' : '🔕 Выключены' }}
+            </button>
+            <span v-else class="setting-note">Не поддерживаются браузером</span>
           </div>
         </div>
 
@@ -95,12 +104,12 @@
           <div class="nft-header">
             <h3>🖼️ NFT Коллекция</h3>
             <div class="nft-tabs">
-              <button 
-                :class="{ active: nftTab === 'shop' }" 
+              <button
+                :class="{ active: nftTab === 'shop' }"
                 @click="nftTab = 'shop'"
               >Магазин</button>
-              <button 
-                :class="{ active: nftTab === 'collection' }" 
+              <button
+                :class="{ active: nftTab === 'collection' }"
                 @click="loadUserNFTs(); nftTab = 'collection'"
               >Моя коллекция ({{ userNfts.length }})</button>
             </div>
@@ -112,9 +121,9 @@
               Магазин пуст
             </div>
             <div v-else class="nft-grid">
-              <div 
-                v-for="item in shopItems" 
-                :key="item.id" 
+              <div
+                v-for="item in shopItems"
+                :key="item.id"
                 class="nft-card"
                 :class="item.rarity"
               >
@@ -130,8 +139,8 @@
                     <span class="nft-price">💰 {{ item.price }}</span>
                   </div>
                 </div>
-                <button 
-                  @click="buyNFT(item)" 
+                <button
+                  @click="buyNFT(item)"
                   class="buy-btn"
                   :disabled="buyingItem === item.id || (user.balance || 0) < item.price"
                 >
@@ -147,9 +156,9 @@
               У вас пока нет NFT
             </div>
             <div v-else class="nft-grid">
-              <div 
-                v-for="nft in userNfts" 
-                :key="nft.id" 
+              <div
+                v-for="nft in userNfts"
+                :key="nft.id"
                 class="nft-card owned"
                 :class="nft.item.rarity"
               >
@@ -211,12 +220,32 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
-import { nftAPI } from '@/services/api.js'
+import { authAPI, nftAPI, usersAPI } from '@/services/api.js'
+import { formatDate, formatDateTime, setUserTimezone } from '@/services/datetime.js'
+import { theme, toggleTheme } from '@/services/theme.js'
+import {
+  disableNotifications,
+  enableNotifications,
+  notificationsEnabled,
+  notificationsSupported,
+} from '@/services/notifications.js'
 
-const API_BASE_URL = '/api/v1'
+const FALLBACK_TIMEZONES = [
+  'UTC',
+  'Europe/Moscow',
+  'Europe/Kiev',
+  'Europe/Minsk',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Asia/Almaty',
+  'Asia/Tbilisi',
+  'Asia/Tokyo',
+  'America/New_York',
+  'America/Los_Angeles',
+]
 
 export default {
   name: 'Profile',
@@ -244,12 +273,26 @@ export default {
     const nftLoading = ref(false)
     const buyingItem = ref(null)
 
+    const timezoneOptions = (() => {
+      try {
+        const supported = Intl.supportedValuesOf?.('timeZone')
+        return supported?.length ? supported : FALLBACK_TIMEZONES
+      } catch (e) {
+        return FALLBACK_TIMEZONES
+      }
+    })()
+
+    const now = ref(Date.now())
+    let clockTimer = null
+
+    const currentTimeInTimezone = computed(() => formatDateTime(new Date(now.value)))
+
     const loadUser = async () => {
       try {
-        const response = await axios.get(`${API_BASE_URL}/users/me`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-        })
-        user.value = response.data
+        user.value = await authAPI.getCurrentUser()
+        if (user.value?.timezone) {
+          setUserTimezone(user.value.timezone)
+        }
         loadShopItems()
       } catch (error) {
         console.error('Error loading user:', error)
@@ -286,7 +329,7 @@ export default {
         alert('Недостаточно шекелей!')
         return
       }
-      
+
       buyingItem.value = item.id
       try {
         const newNft = await nftAPI.buyNFT(item.id)
@@ -301,10 +344,15 @@ export default {
       }
     }
 
-    const formatDate = (dateStr) => {
-      if (!dateStr) return ''
-      const date = new Date(dateStr)
-      return date.toLocaleDateString('ru-RU')
+    const toggleNotifications = async () => {
+      if (notificationsEnabled.value) {
+        disableNotifications()
+        return
+      }
+      const granted = await enableNotifications()
+      if (!granted) {
+        alert('Разрешите уведомления в настройках браузера')
+      }
     }
 
     const getInitials = (name) => {
@@ -319,23 +367,17 @@ export default {
     const handleAvatarChange = async (event) => {
       const file = event.target.files[0]
       if (!file) return
-      
+
       if (file.size > 2 * 1024 * 1024) {
         alert('Файл слишком большой. Максимум 2 МБ')
         return
       }
-      
+
       const formData = new FormData()
       formData.append('file', file)
-      
+
       try {
-        const response = await axios.post(`${API_BASE_URL}/users/me/avatar`, formData, {
-          headers: { 
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-            'Content-Type': 'multipart/form-data'
-          }
-        })
-        user.value = response.data
+        user.value = await authAPI.uploadAvatar(file)
         alert('Аватарка загружена!')
       } catch (error) {
         console.error('Error uploading avatar:', error)
@@ -346,12 +388,9 @@ export default {
 
     const handleAvatarDelete = async () => {
       if (!confirm('Удалить аватарку?')) return
-      
+
       try {
-        const response = await axios.delete(`${API_BASE_URL}/users/me/avatar`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-        })
-        user.value = response.data
+        user.value = await authAPI.deleteAvatar()
         alert('Аватарка удалена')
       } catch (error) {
         console.error('Error deleting avatar:', error)
@@ -364,34 +403,27 @@ export default {
         transferError.value = 'Заполните все поля'
         return
       }
-      
+
       if (transferAmount.value > user.value.balance) {
         transferError.value = 'Недостаточно шекелей'
         return
       }
-      
+
       transferring.value = true
       transferError.value = ''
-      
+
       try {
         // Найдём пользователя по email
-        const searchResponse = await axios.get(`${API_BASE_URL}/users/search?query=${transferEmail.value}`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-        })
-        
-        const recipient = searchResponse.data.data.find(u => u.email === transferEmail.value)
+        const searchResponse = await usersAPI.search(transferEmail.value)
+
+        const recipient = (searchResponse.data || []).find(u => u.email === transferEmail.value)
         if (!recipient) {
           transferError.value = 'Пользователь не найден'
           return
         }
-        
-        await axios.post(`${API_BASE_URL}/users/me/transfer`, {
-          recipient_id: recipient.id,
-          amount: transferAmount.value
-        }, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-        })
-        
+
+        await authAPI.transferShekels(recipient.id, transferAmount.value)
+
         user.value.balance -= transferAmount.value
         showTransferModal.value = false
         transferEmail.value = ''
@@ -428,12 +460,8 @@ export default {
     const saveTimezone = async () => {
       savingTimezone.value = true
       try {
-        const response = await axios.patch(`${API_BASE_URL}/users/me/timezone`, {
-          timezone: editedTimezone.value
-        }, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-        })
-        user.value = response.data
+        user.value = await authAPI.updateTimezone(editedTimezone.value)
+        setUserTimezone(user.value.timezone)
         editingTimezone.value = false
         alert('Часовой пояс сохранен!')
       } catch (error) {
@@ -449,15 +477,10 @@ export default {
         cancelEditName()
         return
       }
-      
+
       savingName.value = true
       try {
-        const response = await axios.patch(`${API_BASE_URL}/users/me`, {
-          full_name: editedName.value || null
-        }, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-        })
-        user.value = response.data
+        user.value = await authAPI.updateProfile({ full_name: editedName.value || null })
         editingName.value = false
         alert('Имя сохранено!')
       } catch (error) {
@@ -475,9 +498,7 @@ export default {
 
       deleting.value = true
       try {
-        await axios.delete(`${API_BASE_URL}/users/me`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-        })
+        await authAPI.deleteAccount()
         localStorage.removeItem('access_token')
         alert('Аккаунт успешно удален')
         router.push('/login')
@@ -495,10 +516,25 @@ export default {
 
     onMounted(() => {
       loadUser()
+      clockTimer = setInterval(() => {
+        now.value = Date.now()
+      }, 1000)
+    })
+
+    onUnmounted(() => {
+      if (clockTimer) clearInterval(clockTimer)
     })
 
     return {
       user,
+      timezoneOptions,
+      currentTimeInTimezone,
+      theme,
+      toggleTheme,
+      notificationsSupported,
+      notificationsEnabled,
+      toggleNotifications,
+      formatDate,
       loading,
       deleting,
       avatarInput,
@@ -532,7 +568,6 @@ export default {
       loadUserNFTs,
       loadShopItems,
       buyNFT,
-      formatDate,
     }
   },
 }
@@ -561,7 +596,7 @@ export default {
 
 .back-btn {
   padding: 0.5rem 1rem;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   cursor: pointer;
@@ -690,6 +725,41 @@ export default {
 
 .info-item span {
   color: var(--text-primary);
+}
+
+.settings-section {
+  margin: 1.5rem 0;
+  padding: 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  color: var(--text-primary);
+}
+
+.setting-btn {
+  padding: 0.5rem 0.875rem;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.setting-btn:hover {
+  border-color: var(--primary-purple);
+}
+
+.setting-note {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
 }
 
 .balance-section {
@@ -828,7 +898,7 @@ export default {
   padding: 0.75rem;
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   color: var(--text-primary);
 }
 
@@ -884,7 +954,7 @@ export default {
   padding: 0.5rem;
   border: 1px solid var(--primary-purple);
   border-radius: 6px;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   color: var(--text-primary);
 }
 
@@ -893,7 +963,7 @@ export default {
   padding: 0.5rem;
   border: 1px solid var(--primary-purple);
   border-radius: 6px;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   color: var(--text-primary);
   cursor: pointer;
 }

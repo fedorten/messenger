@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlmodel import Session, select
@@ -111,6 +112,30 @@ class ConnectionManager:
     def is_user_online(self, user_id: int) -> bool:
         return user_id in self.user_connections
 
+    async def notify_chat_members(
+        self,
+        message: dict[str, Any],
+        chat_id: int,
+        user_ids: list[int],
+        exclude_user: int | None,
+    ) -> None:
+        """Отправить событие для пуш-уведомлений всем участникам чата, кроме автора.
+
+        В отличие от broadcast_to_chat, доходит и до тех, кто открыл другую страницу
+        (глобальное соединение chat_id=0), поэтому уведомление видно вне чата.
+        """
+        chat_connections = self.active_connections.get(chat_id, set())
+        for user_id in user_ids:
+            if user_id == exclude_user:
+                continue
+            for conn in list(self.user_connections.get(user_id, set())):
+                if conn in chat_connections:
+                    continue
+                try:
+                    await conn.send_json(message)
+                except Exception:
+                    pass
+
     async def send_to_user(self, message: dict, user_id: int):
         """Отправить сообщение конкретному пользователю"""
         if user_id in self.user_connections:
@@ -222,7 +247,9 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
                             media_filename=message.media_filename,
                             media_url=message.media_url,
                             media_size=message.media_size,
-                            is_read=compute_message_is_read(session, chat, message, user.id)
+                            is_read=compute_message_is_read(
+                                session, chat, message, user.id
+                            )
                             if chat
                             else False,
                             created_at=message.created_at,
@@ -237,6 +264,25 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: int):
                                 "message": message_public.model_dump(mode="json"),
                             },
                             chat_id,
+                        )
+
+                        member_ids = session.exec(
+                            select(ChatMember.user_id).where(
+                                ChatMember.chat_id == chat_id
+                            )
+                        ).all()
+                        await manager.notify_chat_members(
+                            {
+                                "type": "message_notification",
+                                "chat_id": chat_id,
+                                "chat_name": chat.name if chat else None,
+                                "sender_name": user.full_name or user.email,
+                                "sender_avatar_url": user.avatar_url,
+                                "preview": (message.content or "")[:120],
+                            },
+                            chat_id,
+                            list(member_ids),
+                            exclude_user=user.id,
                         )
 
                         if chat and chat.chat_type == "bot" and chat.bot_id:

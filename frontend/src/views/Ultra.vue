@@ -110,7 +110,7 @@
       <!-- Настройки профиля Ultra -->
       <div v-if="ultraStatus.is_ultra" class="customize-section">
         <h3>🎨 Кастомизация профиля</h3>
-        
+
         <div class="custom-option">
           <label>Цвет ника в чате:</label>
           <div class="color-options">
@@ -146,6 +146,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ultraAPI, authAPI } from '../services/api'
+import { formatDateTime } from '../services/datetime'
 
 export default {
   name: 'Ultra',
@@ -237,10 +238,6 @@ export default {
       return badge ? `${badge.emoji} ${badge.name}` : 'Нет'
     }
 
-    const formatDate = (dateStr) => {
-      const date = new Date(dateStr)
-      return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
-    }
 
     const goBack = () => {
       router.push('/profile')
@@ -266,7 +263,7 @@ export default {
       setProfileColor,
       setAvatarStyle,
       getCurrentBadge,
-      formatDate,
+      formatDate: formatDateTime,
       goBack,
     }
   },

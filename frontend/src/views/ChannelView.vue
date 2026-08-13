@@ -3,7 +3,10 @@
     <header class="channel-header">
       <button @click="goBack" class="back-btn">← Назад</button>
       <div class="channel-title">
-        <div class="channel-avatar">{{ getInitials(channel?.name) }}</div>
+        <div class="channel-avatar">
+          <img v-if="channel?.avatar_url" :src="channel.avatar_url" :alt="channel?.name" class="channel-avatar-img" />
+          <span v-else>{{ getInitials(channel) }}</span>
+        </div>
         <div>
           <h1>{{ channel?.name }}</h1>
           <p class="channel-desc">{{ channel?.description }}</p>
@@ -32,10 +35,10 @@
       <div class="posts-list">
         <div v-for="post in posts" :key="post.id" class="post-card">
           <div class="post-header">
-            <div class="author-avatar">{{ getInitials(post.author) }}</div>
+            <UserAvatar :user="post.author" :size="40" />
             <div class="author-info">
-              <span class="author-name">{{ post.author?.full_name || 'Пользователь' }}</span>
-              <span class="post-date">{{ formatDate(post.created_at) }}</span>
+              <UserName :user="post.author" class="author-name" />
+              <span class="post-date">{{ formatDateTime(post.created_at) }}</span>
             </div>
             <button v-if="canDeletePost(post)" @click="deletePost(post.id)" class="delete-post-btn">🗑️</button>
           </div>
@@ -45,7 +48,7 @@
             <video v-else-if="post.media_type === 'video'" :src="post.media_url" controls />
           </div>
         </div>
-        
+
         <div v-if="posts.length === 0" class="empty-state">
           В канале пока нет постов
         </div>
@@ -66,8 +69,8 @@
           </div>
           <div v-if="searchResults.length > 0" class="search-results">
             <div v-for="user in searchResults" :key="user.id" class="search-result-item" @click="addAdmin(user.id)">
-              <div class="user-avatar">{{ getInitials(user) }}</div>
-              <span>{{ user.full_name || user.email }}</span>
+              <UserAvatar :user="user" :size="36" />
+              <UserName :user="user" />
             </div>
           </div>
         </div>
@@ -80,9 +83,13 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { channelsAPI, usersAPI, authAPI } from '../services/api'
+import { formatDateTime } from '../services/datetime'
+import UserAvatar from '../components/UserAvatar.vue'
+import UserName from '../components/UserName.vue'
 
 export default {
   name: 'ChannelView',
+  components: { UserAvatar, UserName },
   setup() {
     const route = useRoute()
     const router = useRouter()
@@ -99,10 +106,10 @@ export default {
       try {
         const user = await authAPI.getCurrentUser()
         currentUserId.value = user.id
-        
+
         const channelRes = await channelsAPI.getChannel(route.params.channelId)
         channel.value = channelRes
-        
+
         const postsRes = await channelsAPI.getPosts(route.params.channelId)
         posts.value = postsRes.data || []
       } catch (e) {
@@ -189,11 +196,6 @@ export default {
       return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     }
 
-    const formatDate = (dateStr) => {
-      const date = new Date(dateStr)
-      return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-    }
-
     onMounted(loadChannel)
 
     return {
@@ -212,7 +214,7 @@ export default {
       addAdmin,
       goBack,
       getInitials,
-      formatDate,
+      formatDateTime,
     }
   },
 }
@@ -238,7 +240,7 @@ export default {
 
 .back-btn {
   padding: 0.5rem 1rem;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-sunken);
   border: 1px solid var(--border-color, #333);
   border-radius: 8px;
   color: var(--text-primary, #eee);
@@ -250,6 +252,13 @@ export default {
   align-items: center;
   gap: 1rem;
   flex: 1;
+}
+
+.channel-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
 }
 
 .channel-avatar {
@@ -282,7 +291,7 @@ export default {
 
 .action-btn, .delete-btn {
   padding: 0.5rem 1rem;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   border: 1px solid var(--border-color, #333);
   border-radius: 8px;
   color: var(--text-primary, #eee);

@@ -1,7 +1,19 @@
 from datetime import datetime, timezone
+from typing import Annotated
 
-from pydantic import EmailStr
+from pydantic import EmailStr, PlainSerializer
 from sqlmodel import Column, DateTime, Field, Integer, Relationship, SQLModel, func
+
+
+def serialize_utc(value: datetime) -> str:
+    """Отдаём время как UTC с явной таймзоной, чтобы клиент не считал его локальным."""
+    aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return aware.astimezone(timezone.utc).isoformat()
+
+
+UTCDatetime = Annotated[
+    datetime, PlainSerializer(serialize_utc, return_type=str, when_used="json")
+]
 
 
 # Shared properties
@@ -81,10 +93,10 @@ class UserPublic(UserBase):
     ban_reason: str | None = None
     is_superuser: bool = False
     timezone: str = "UTC"
-    last_seen: datetime | None = None
+    last_seen: UTCDatetime | None = None
     is_online: bool = False
     is_ultra: bool = False
-    ultra_expires_at: datetime | None = None
+    ultra_expires_at: UTCDatetime | None = None
     ultra_badge: str | None = None
     ultra_profile_color: str | None = None
     ultra_avatar_style: str | None = None
@@ -99,7 +111,7 @@ class UserAdminPublic(UserBase):
     is_banned: bool
     ban_reason: str | None
     timezone: str = "UTC"
-    last_seen: datetime | None = None
+    last_seen: UTCDatetime | None = None
 
 
 class UsersPublic(SQLModel):
@@ -232,8 +244,8 @@ class ChatPublic(SQLModel):
     chat_type: str
     name: str | None
     avatar_url: str | None = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
     members: list["ChatMemberPublic"] = Field(default_factory=list)
     last_message: "ChatMessagePublic | None" = None
     bot: "ChatBotPublic | None" = None
@@ -244,8 +256,8 @@ class ChatMemberPublic(SQLModel):
     user_id: int
     role: str
     user: UserPublic
-    joined_at: datetime
-    last_read_at: datetime | None
+    joined_at: UTCDatetime
+    last_read_at: UTCDatetime | None
 
 
 class ChatAddMembers(SQLModel):
@@ -279,8 +291,8 @@ class ChatMessagePublic(SQLModel):
     media_url: str | None = None
     media_size: int | None = None
     is_read: bool = False
-    created_at: datetime
-    edited_at: datetime | None = None
+    created_at: UTCDatetime
+    edited_at: UTCDatetime | None = None
 
 
 class ChatMessageUpdate(SQLModel):
@@ -337,7 +349,7 @@ class UserNFT(SQLModel, table=True):
 class UserNFTPublic(SQLModel):
     id: int
     item: NFTItemPublic
-    purchased_at: datetime
+    purchased_at: UTCDatetime
 
 
 class BuyNFT(SQLModel):
@@ -433,8 +445,8 @@ class SeasonPublic(SQLModel):
     name: str
     number: int
     is_active: bool
-    start_date: datetime | None = None
-    end_date: datetime | None = None
+    start_date: UTCDatetime | None = None
+    end_date: UTCDatetime | None = None
 
 
 class SeasonTaskPublic(SQLModel):
@@ -484,8 +496,8 @@ class ChatBotPublic(SQLModel):
     language: str
     is_active: bool
     is_public: bool
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
 
 
 class ChatBotCreate(SQLModel):
@@ -577,8 +589,8 @@ class ForumPostPublic(SQLModel):
     media_type: str | None = None
     media_url: str | None = None
     media_filename: str | None = None
-    created_at: datetime
-    updated_at: datetime | None = None
+    created_at: UTCDatetime
+    updated_at: UTCDatetime | None = None
     likes_count: int = 0
     comments_count: int = 0
     is_liked: bool = False
@@ -590,7 +602,7 @@ class ForumCommentPublic(SQLModel):
     author_id: int
     author: UserPublic | None = None
     content: str
-    created_at: datetime
+    created_at: UTCDatetime
 
 
 class ForumPostsPublic(SQLModel):
@@ -693,7 +705,7 @@ class ChannelPublic(SQLModel):
     description: str | None = None
     avatar_url: str | None = None
     is_public: bool = True
-    created_at: datetime
+    created_at: UTCDatetime
     is_admin: bool = False
     is_creator: bool = False
 
@@ -707,7 +719,7 @@ class ChannelPostPublic(SQLModel):
     media_type: str | None = None
     media_url: str | None = None
     media_filename: str | None = None
-    created_at: datetime
+    created_at: UTCDatetime
 
 
 class ChannelsPublic(SQLModel):

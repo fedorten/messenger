@@ -6,15 +6,15 @@
     </header>
 
     <div class="tabs">
-      <button 
+      <button
         :class="['tab', { active: activeTab === 'users' }]"
         @click="activeTab = 'users'"
       >👥 Пользователи</button>
-      <button 
+      <button
         :class="['tab', { active: activeTab === 'nfts' }]"
         @click="activeTab = 'nfts'; loadNFTs()"
       >🖼️ NFT Магазин</button>
-      <button 
+      <button
         :class="['tab', { active: activeTab === 'seasons' }]"
         @click="activeTab = 'seasons'; loadSeasons()"
       >🏆 Сезоны</button>
@@ -51,35 +51,35 @@
             </td>
             <td>{{ user.ban_reason || '-' }}</td>
             <td class="actions">
-              <button 
+              <button
                 v-if="!user.is_banned && !user.is_superuser"
                 @click="showBanModal(user)"
                 class="ban-btn"
               >
                 🚫 Забанить
               </button>
-              <button 
+              <button
                 v-if="user.is_banned"
                 @click="unbanUser(user.id)"
                 class="unban-btn"
               >
                 ✅ Разбанить
               </button>
-              <button 
+              <button
                 v-if="!user.is_superuser"
                 @click="user.is_ultra ? revokeUltra(user.id) : grantUltra(user)"
                 :class="['ultra-btn', { active: user.is_ultra }]"
               >
                 {{ user.is_ultra ? '⚡ Убрать Ultra' : '⚡ Дать Ultra' }}
               </button>
-              <button 
+              <button
                 v-if="!user.is_superuser"
                 @click="user.is_verified ? unverifyUser(user.id) : verifyUser(user.id)"
                 :class="['verify-btn', { active: user.is_verified }]"
               >
                 {{ user.is_verified ? '✓ Убрать верификацию' : '✓ Верифицировать' }}
               </button>
-              <button 
+              <button
                 v-if="!user.is_superuser"
                 @click="deleteUser(user)"
                 class="delete-btn"
@@ -187,8 +187,8 @@
       <div class="modal-content">
         <h3>Заблокировать пользователя</h3>
         <p>{{ banTarget?.email }}</p>
-        <textarea 
-          v-model="banReason" 
+        <textarea
+          v-model="banReason"
           placeholder="Причина бана (необязательно)"
           rows="3"
         ></textarea>
@@ -780,7 +780,7 @@ export default {
 
 .back-btn {
   padding: 0.5rem 1rem;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   color: var(--text-primary);
@@ -835,7 +835,7 @@ export default {
 }
 
 .users-table th {
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   color: var(--text-secondary);
   font-weight: 600;
 }
@@ -979,7 +979,7 @@ export default {
   padding: 0.75rem;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   color: var(--text-primary);
   resize: vertical;
   margin-bottom: 1rem;
@@ -1044,7 +1044,7 @@ export default {
   padding: 0.75rem;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   color: var(--text-primary);
   box-sizing: border-box;
 }
@@ -1112,7 +1112,7 @@ export default {
 }
 
 .nft-table th {
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   color: var(--text-secondary);
   font-weight: 600;
 }
@@ -1177,7 +1177,7 @@ export default {
   padding: 0.75rem;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   color: var(--text-primary);
   box-sizing: border-box;
 }

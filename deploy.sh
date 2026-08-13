@@ -1,67 +1,52 @@
 #!/bin/bash
 
-# Deployment script for paerser2.ru
-# Usage: ./deploy.sh [--no-cache]
+# Деплой fusionmessenger.ru без Docker (systemd + nginx)
+# Использование: ./deploy.sh
+#
+# Скрипт НЕ трогает базу данных: файл SQLite (по умолчанию backend/app.db)
+# и каталог backend/media остаются такими, какие есть на сервере.
 
 set -e
 
-echo "🚀 Starting deployment..."
-
-# Colors for output
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'
+NC='\033[0m'
 
-# Check if .env file exists
 if [ ! -f .env ]; then
-    echo -e "${RED}❌ .env file not found!${NC}"
-    echo "Please create .env file with required variables."
+    echo -e "${RED}❌ .env не найден — создайте его из .env.example${NC}"
     exit 1
 fi
 
-# Load environment variables
+set -a
 source .env
+set +a
 
-# Set defaults
-export DOMAIN=${DOMAIN:-paerser2.ru}
-export DOCKER_IMAGE_BACKEND=${DOCKER_IMAGE_BACKEND:-messager-backend}
-export DOCKER_IMAGE_FRONTEND=${DOCKER_IMAGE_FRONTEND:-messager-frontend}
-export TAG=${TAG:-latest}
-export ENVIRONMENT=${ENVIRONMENT:-production}
+export DOMAIN=${DOMAIN:-fusionmessenger.ru}
+BACKEND_SERVICE=${BACKEND_SERVICE:-messenger-backend}
 
-echo -e "${GREEN}✓ Environment variables loaded${NC}"
+echo -e "${GREEN}✓ Окружение загружено${NC}"
 echo "  DOMAIN: $DOMAIN"
-echo "  ENVIRONMENT: $ENVIRONMENT"
+echo "  БД: ${SQLITE_DB_PATH:-backend/app.db} (не перезаписывается)"
 
-# Check if --no-cache flag is provided
-NO_CACHE=""
-if [[ "$1" == "--no-cache" ]]; then
-    NO_CACHE="--no-cache"
-    echo -e "${BLUE}ℹ️  Building without cache${NC}"
+echo -e "${YELLOW}📦 Зависимости бэкенда...${NC}"
+(cd backend && uv sync --frozen)
+
+echo -e "${YELLOW}📦 Сборка фронтенда...${NC}"
+(cd frontend && npm ci && npm run build)
+
+if systemctl list-unit-files "${BACKEND_SERVICE}.service" >/dev/null 2>&1 &&
+    systemctl cat "${BACKEND_SERVICE}" >/dev/null 2>&1; then
+    echo -e "${YELLOW}🔄 Перезапуск ${BACKEND_SERVICE}...${NC}"
+    sudo systemctl restart "${BACKEND_SERVICE}"
+else
+    echo -e "${YELLOW}ℹ️  systemd-юнит ${BACKEND_SERVICE} не найден — перезапустите бэкенд вручную${NC}"
+    echo "   (или задайте BACKEND_SERVICE=имя_юнита ./deploy.sh)"
 fi
 
-# Build and deploy
-echo -e "${YELLOW}📦 Building Docker images...${NC}"
-docker compose -f docker-compose.prod.yml build $NO_CACHE
+if command -v nginx >/dev/null 2>&1; then
+    echo -e "${YELLOW}🔄 Перезагрузка nginx...${NC}"
+    sudo nginx -t && sudo systemctl reload nginx
+fi
 
-echo -e "${YELLOW}🛑 Stopping existing containers...${NC}"
-docker compose -f docker-compose.prod.yml down
-
-echo -e "${YELLOW}🚀 Starting containers...${NC}"
-docker compose -f docker-compose.prod.yml up -d
-
-echo -e "${GREEN}✅ Deployment completed!${NC}"
-echo ""
-echo "Your application should be available at:"
-echo "  Frontend: http://$DOMAIN"
-echo "  Backend API: http://$DOMAIN/api/v1"
-echo "  API Docs: http://$DOMAIN/api/v1/docs"
-echo ""
-echo "To view logs:"
-echo "  docker compose -f docker-compose.prod.yml logs -f"
-echo ""
-echo "To restart services:"
-echo "  docker compose -f docker-compose.prod.yml restart"
-
+echo -e "${GREEN}✅ Деплой завершён: https://${DOMAIN}${NC}"

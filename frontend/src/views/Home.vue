@@ -6,6 +6,18 @@
         <button v-if="activeSeason" @click="showSeasonModal = true" class="season-btn">
           🏆 {{ activeSeason.name }}
         </button>
+        <button @click="toggleTheme" class="theme-btn" :title="theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'">
+          {{ theme === 'dark' ? '☀️' : '🌙' }}
+        </button>
+        <button
+          v-if="notificationsSupported"
+          @click="toggleNotifications"
+          class="notify-btn"
+          :class="{ active: notificationsEnabled }"
+          :title="notificationsEnabled ? 'Отключить уведомления' : 'Включить уведомления'"
+        >
+          {{ notificationsEnabled ? '🔔' : '🔕' }}
+        </button>
         <router-link v-if="currentUser && currentUser.is_superuser" to="/admin" class="admin-link">⚙️</router-link>
         <router-link to="/forum" class="forum-link">📋</router-link>
         <router-link to="/channels" class="channels-link">📢</router-link>
@@ -37,7 +49,7 @@
             </div>
             <div class="task-reward">
               <span>Награда: {{ task.base_reward }}+ шекелей</span>
-              <button 
+              <button
                 v-if="!task.is_completed"
                 @click="claimTask(task.id)"
                 class="claim-btn"
@@ -78,7 +90,9 @@
             >
               <div class="user-info">
                 <span v-if="item.type === 'bot'" class="type-badge">🤖</span>
-                <strong>{{ item.name || item.full_name || item.email }}</strong>
+                <UserAvatar v-else :user="item" :size="36" />
+                <strong v-if="item.type === 'bot'">{{ item.name || item.full_name || item.email }}</strong>
+                <UserName v-else :user="item" />
                 <span v-if="item.type === 'bot'" class="bot-badge">Бот</span>
                 <span v-else class="user-email">{{ item.email }}</span>
               </div>
@@ -106,10 +120,10 @@
             @click="openChat(chat.id)"
           >
             <div class="avatar-wrapper">
-              <img 
-                v-if="getChatAvatar(chat)" 
-                :src="getChatAvatar(chat)" 
-                class="chat-avatar" 
+              <img
+                v-if="getChatAvatar(chat)"
+                :src="getChatAvatar(chat)"
+                class="chat-avatar"
               />
               <div v-else class="chat-avatar-placeholder">
                 {{ getChatInitials(chat) }}
@@ -169,7 +183,8 @@
                 @click="toggleGroupMember(user)"
               >
                 <div class="member-info">
-                  <strong>{{ user.full_name || user.email }}</strong>
+                  <UserAvatar :user="user" :size="32" />
+                  <UserName :user="user" />
                   <span class="member-email">{{ user.email }}</span>
                 </div>
                 <div class="checkbox" :class="{ checked: isMemberSelected(user.id) }">
@@ -212,9 +227,20 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { usersAPI, chatsAPI, botsAPI } from '../services/api'
+import { formatRelative, setUserTimezone } from '../services/datetime'
+import { theme, toggleTheme } from '../services/theme'
+import {
+  disableNotifications,
+  enableNotifications,
+  notificationsEnabled,
+  notificationsSupported,
+} from '../services/notifications'
+import UserAvatar from '../components/UserAvatar.vue'
+import UserName from '../components/UserName.vue'
 
 export default {
   name: 'Home',
+  components: { UserAvatar, UserName },
   setup() {
     const router = useRouter()
     const searchQuery = ref('')
@@ -258,6 +284,8 @@ export default {
               onlineUsers.value.add(data.user_id)
             } else if (data.type === 'user_offline') {
               onlineUsers.value.delete(data.user_id)
+            } else if (data.type === 'message_notification') {
+              loadChats()
             }
           } catch (e) {}
         }
@@ -280,15 +308,15 @@ export default {
 
       // Clear previous timeout
       if (searchTimeout) clearTimeout(searchTimeout)
-      
+
       searchTimeout = setTimeout(async () => {
         searching.value = true
         searchResults.value = []
-        
+
         try {
           console.log('=== SEARCH START ===')
           console.log('Query:', searchQuery.value)
-          
+
           // Fetch bots using search endpoint
           let botsData = []
           try {
@@ -298,7 +326,7 @@ export default {
           } catch (bote) {
             console.error('Bots search error:', bots)
           }
-          
+
           // Fetch users
           let usersData = []
           try {
@@ -308,16 +336,16 @@ export default {
           } catch (ue) {
             console.error('Users fetch error:', ue)
           }
-          
+
           // Bots already filtered by backend, just add type
           const bots = botsData.map(b => ({ ...b, type: 'bot' }))
-          
+
           console.log('Filtered bots:', bots)
           console.log('=== SEARCH END ===')
-          
+
           const users = usersData.map(u => ({ ...u, type: 'user' }))
           searchResults.value = [...bots, ...users]
-          
+
         } catch (error) {
           console.error('Search error:', error)
           searchResults.value = []
@@ -399,17 +427,15 @@ export default {
       return otherMember?.user?.is_verified || false
     }
 
-    const formatTime = (dateString) => {
-      const date = new Date(dateString)
-      const now = new Date()
-      const diff = now - date
-      const minutes = Math.floor(diff / 60000)
-      
-      if (minutes < 1) return 'только что'
-      if (minutes < 60) return `${minutes} мин назад`
-      const hours = Math.floor(minutes / 60)
-      if (hours < 24) return `${hours} ч назад`
-      return date.toLocaleDateString()
+    const toggleNotifications = async () => {
+      if (notificationsEnabled.value) {
+        disableNotifications()
+        return
+      }
+      const granted = await enableNotifications()
+      if (!granted) {
+        alert('Разрешите уведомления в настройках браузера')
+      }
     }
 
     const loadChats = async () => {
@@ -477,14 +503,14 @@ export default {
       try {
         const memberIds = selectedMembers.value.map(m => m.id)
         const chat = await chatsAPI.createGroupChat(newGroupName.value, memberIds)
-        
+
         // Сброс формы
         showCreateGroup.value = false
         newGroupName.value = ''
         groupMemberSearch.value = ''
         groupSearchResults.value = []
         selectedMembers.value = []
-        
+
         // Обновляем список чатов и переходим в новый чат
         await loadChats()
         router.push(`/chat/${chat.id}`)
@@ -533,13 +559,16 @@ export default {
       try {
         const { authAPI } = await import('../services/api')
         currentUser.value = await authAPI.getCurrentUser()
+        if (currentUser.value?.timezone) {
+          setUserTimezone(currentUser.value.timezone)
+        }
       } catch (error) {
         console.error('Error loading user:', error)
       }
       await loadChats()
       await loadSeasonData()
       initWebSocket()
-      
+
       // Polling for new chats (fallback)
       setInterval(async () => {
         try {
@@ -570,7 +599,12 @@ export default {
       getChatName,
       getChatAvatar,
       getChatInitials,
-      formatTime,
+      formatTime: formatRelative,
+      theme,
+      toggleTheme,
+      notificationsSupported,
+      notificationsEnabled,
+      toggleNotifications,
       handleGroupMemberSearch,
       toggleGroupMember,
       isMemberSelected,
@@ -647,6 +681,26 @@ export default {
   text-decoration: none;
   font-size: 1.25rem;
   transition: all 0.3s ease;
+}
+
+.theme-btn,
+.notify-btn {
+  padding: 0.375rem 0.5rem;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.theme-btn:hover,
+.notify-btn:hover {
+  border-color: var(--primary-purple);
+}
+
+.notify-btn.active {
+  border-color: var(--success);
 }
 
 .admin-link:hover {
@@ -753,7 +807,7 @@ h2 {
   border-radius: 8px;
   font-size: 1rem;
   box-sizing: border-box;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   color: var(--text-primary);
   transition: all 0.3s ease;
 }
@@ -766,7 +820,7 @@ h2 {
   outline: none;
   border-color: var(--primary-purple);
   box-shadow: 0 0 0 3px rgba(147, 51, 234, 0.1);
-  background: rgba(10, 10, 10, 0.7);
+  background: var(--bg-sunken);
 }
 
 .search-results {
@@ -783,7 +837,7 @@ h2 {
   margin-bottom: 0.5rem;
   cursor: pointer;
   transition: all 0.3s ease;
-  background: rgba(10, 10, 10, 0.3);
+  background: var(--bg-sunken);
 }
 
 .user-item:hover {
@@ -794,7 +848,9 @@ h2 {
 
 .user-info {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
 }
 
 .user-info strong {
@@ -853,7 +909,7 @@ h2 {
   margin-bottom: 0.5rem;
   cursor: pointer;
   transition: all 0.3s ease;
-  background: rgba(10, 10, 10, 0.3);
+  background: var(--bg-sunken);
 }
 
 .chat-avatar {
@@ -1074,7 +1130,7 @@ h2 {
   border-radius: 8px;
   font-size: 1rem;
   box-sizing: border-box;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   color: var(--text-primary);
   transition: all 0.3s ease;
 }
@@ -1091,7 +1147,7 @@ h2 {
   overflow-y: auto;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
 }
 
 .member-item {
@@ -1114,8 +1170,10 @@ h2 {
 
 .member-info {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
   flex: 1;
+  min-width: 0;
 }
 
 .member-info strong {
@@ -1245,7 +1303,7 @@ h2 {
   .content {
     grid-template-columns: 1fr;
   }
-  
+
   .modal-content {
     max-width: 100%;
     margin: 1rem;
@@ -1284,7 +1342,7 @@ h2 {
 
 .progress-bar {
   height: 20px;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   border-radius: 10px;
   overflow: hidden;
   margin-bottom: 0.5rem;
@@ -1302,7 +1360,7 @@ h2 {
 }
 
 .task-item {
-  background: rgba(10, 10, 10, 0.3);
+  background: var(--bg-sunken);
   border-radius: 8px;
   padding: 1rem;
   margin-bottom: 0.75rem;

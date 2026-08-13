@@ -17,8 +17,8 @@
 |----------|------|
 | Backend | FastAPI, SQLModel, SQLite, JWT |
 | Frontend | Vue 3, Vite, Axios |
-| Proxy | Traefik с автоматическим HTTPS |
-| Container | Docker Compose |
+| Proxy | nginx + certbot (Let's Encrypt) |
+| Запуск на проде | uvicorn под systemd, без Docker |
 
 ## Структура проекта
 
@@ -45,15 +45,9 @@ messenger/
 
 ## Быстрый старт
 
-### Docker (рекомендуется)
-
 ```bash
-# Клонировать и настроить
 cp .env.example .env
 nano .env  # Настройте DOMAIN и SECRET_KEY
-
-# Запустить
-docker compose up -d --build
 ```
 
 ### Локальная разработка
@@ -78,26 +72,26 @@ npm run dev
 
 ```env
 # Домен
-DOMAIN=paerser2.ru
+DOMAIN=fusionmessenger.ru
 
 # Окружение
 ENVIRONMENT=production
 
 # Frontend URL
-FRONTEND_HOST=https://paerser2.ru
+FRONTEND_HOST=https://fusionmessenger.ru
 
 # CORS
-BACKEND_CORS_ORIGINS=https://paerser2.ru,https://api.paerser2.ru
+BACKEND_CORS_ORIGINS=https://fusionmessenger.ru,http://fusionmessenger.ru
 
 # Секретный ключ (сгенерируйте: python -c "import secrets; print(secrets.token_urlsafe(32))")
 SECRET_KEY=your_secret_key
 
 # Первый суперпользователь
-FIRST_SUPERUSER=admin@paerser2.ru
+FIRST_SUPERUSER=admin@fusionmessenger.ru
 FIRST_SUPERUSER_PASSWORD=your_strong_password
 
-# SQLite путь
-SQLITE_DB_PATH=data/app.db
+# SQLite путь (относительный путь считается от каталога backend/)
+SQLITE_DB_PATH=app.db
 ```
 
 ## API Endpoints
@@ -175,49 +169,47 @@ WS /api/v1/ws/{chat_id}?token={jwt_token}
 
 ## Деплой
 
+Прод крутится без Docker: uvicorn под systemd + nginx со статикой Vite.
+Подробная инструкция — в [DEPLOY.md](DEPLOY.md).
+
 ### Требования
 
-- Docker 24+
-- Docker Compose 2.20+
-- Домен с A-записями
+- nginx + certbot
+- Python 3.10+, uv
+- Node.js 20+
+- Домен с A-записью на сервер
 
 ### DNS настройка
 
 ```
-A запись: paerser2.ru -> 217.18.61.113
-A запись: api.paerser2.ru -> 217.18.61.113
+A запись: fusionmessenger.ru -> IP сервера
 ```
 
-### Запуск
+### Запуск и обновление
 
 ```bash
-docker compose -f docker-compose.yml up -d --build
+./deploy.sh   # зависимости, сборка фронта, restart messenger-backend, reload nginx
+./update.sh   # git pull + deploy.sh
 ```
+
+База (`backend/app.db`) и загруженные файлы лежат только на сервере и в git не попадают,
+поэтому обновление кода их не перезаписывает.
 
 ## Управление
 
 ```bash
-# Логи
-docker compose logs -f
-
-# Перезапуск
-docker compose restart
-
-# Остановка
-docker compose down
-
-# Обновление
-git pull && docker compose up -d --build
+sudo systemctl restart messenger-backend
+sudo journalctl -u messenger-backend -f
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
 ## Доступ после запуска
 
 | Сервис | URL |
 |--------|-----|
-| Frontend | https://paerser2.ru |
-| API | https://api.paerser2.ru |
-| API Docs | https://api.paerser2.ru/docs |
-| Adminer | https://adminer.paerser2.ru |
+| Frontend | https://fusionmessenger.ru |
+| API | https://fusionmessenger.ru/api/v1 |
+| API Docs | https://fusionmessenger.ru/api/v1/docs |
 
 ## Лицензия
 

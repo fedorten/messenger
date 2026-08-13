@@ -4,10 +4,10 @@
       <button @click="goBack" class="back-btn" aria-label="Назад">‹</button>
       <div class="chat-title" @click="isAdmin && !isEditingName && (isEditingName = true)">
         <h2 v-if="!isEditingName">{{ chatName }}</h2>
-        <input 
-          v-else 
-          v-model="editedName" 
-          @blur="saveChatName" 
+        <input
+          v-else
+          v-model="editedName"
+          @blur="saveChatName"
           @keyup.enter="saveChatName"
           @keyup.esc="cancelEditName"
           class="name-input"
@@ -70,9 +70,9 @@
           :class="['message', { 'own-message': message.sender_id === currentUserId }]"
         >
           <div class="avatar-wrapper">
-            <img 
-              v-if="message.sender?.avatar_url" 
-              :src="message.sender.avatar_url" 
+            <img
+              v-if="message.sender?.avatar_url"
+              :src="message.sender.avatar_url"
               :class="['message-avatar', getAvatarClass(message)]"
             />
             <div v-else :class="['message-avatar-placeholder', getAvatarClass(message)]">
@@ -92,7 +92,7 @@
                 <span v-if="message.sender_id === currentUserId" class="read-status">
                   {{ message.is_read ? '✓✓' : '✓' }}
                 </span>
-                <button 
+                <button
                   v-if="message.sender_id === currentUserId"
                   @click.stop="deleteMessage(message)"
                   class="delete-btn"
@@ -103,9 +103,9 @@
               </div>
             </div>
           <div v-if="message.media_type" class="message-media">
-            <img 
-              v-if="message.media_type === 'image'" 
-              :src="message.media_url" 
+            <img
+              v-if="message.media_type === 'image'"
+              :src="message.media_url"
               :alt="message.media_filename"
               class="media-image"
               @click="openMediaModal(message)"
@@ -283,50 +283,50 @@
           <h3>{{ aiMode === 'chat' ? 'Чат с ИИ' : 'Редактирование сообщения' }}</h3>
           <button @click="showAIModal = false" class="close-btn">×</button>
         </div>
-        
+
         <div v-if="aiMode === 'edit'" class="ai-edit-mode">
           <div class="form-group">
             <label>Введи запрос:</label>
-            <textarea 
-              v-model="aiEditPrompt" 
+            <textarea
+              v-model="aiEditPrompt"
               placeholder="Опиши как изменить сообщение..."
               class="input"
             ></textarea>
           </div>
-          
+
           <div class="form-group">
             <label>Твой текст:</label>
-            <textarea 
-              v-model="aiEditText" 
+            <textarea
+              v-model="aiEditText"
               placeholder="Текст для изменения"
               class="input"
             ></textarea>
           </div>
-          
+
           <div class="form-group">
             <label>Результат:</label>
-            <textarea 
-              v-model="aiResult" 
+            <textarea
+              v-model="aiResult"
               placeholder="Здесь появится отредактированное сообщение"
               class="input"
               readonly
             ></textarea>
           </div>
-          
+
           <div class="modal-actions">
             <button @click="showAIModal = false" class="btn-secondary">Отмена</button>
-            <button 
-              @click="applyAIEdit" 
+            <button
+              @click="applyAIEdit"
               class="btn-primary"
             >Отправить</button>
-            <button 
+            <button
               v-if="aiResult"
-              @click="applyAIResult" 
+              @click="applyAIResult"
               class="btn-primary"
             >Применить</button>
           </div>
         </div>
-        
+
         <div v-else class="ai-chat-mode">
           <p class="ai-hint">Напиши что хочешь спросить у ИИ</p>
           <button @click="sendAIChat" class="btn-primary">Отправить вопрос</button>
@@ -358,7 +358,8 @@
                 @click="toggleAddMember(user)"
               >
                 <div class="member-info">
-                  <strong>{{ user.full_name || user.email }}</strong>
+                  <UserAvatar :user="user" :size="32" />
+                  <UserName :user="user" />
                   <span class="member-email">{{ user.email }}</span>
                 </div>
                 <div class="checkbox" :class="{ checked: isAddMemberSelected(user.id) }">
@@ -404,24 +405,25 @@
         </div>
         <div class="modal-body">
           <div class="members-list">
-            <div 
-              v-for="member in currentChat?.members" 
+            <div
+              v-for="member in currentChat?.members"
               :key="member.id"
               class="member-row"
             >
               <div class="member-info">
-                <strong>{{ member.user?.full_name || member.user?.email }}</strong>
+                <UserAvatar :user="member.user" :size="32" />
+                <UserName :user="member.user" />
                 <span class="member-role">{{ member.role === 'admin' ? 'Админ' : 'Участник' }}</span>
               </div>
               <div v-if="isAdmin && member.user_id !== currentUserId" class="member-actions">
-                <button 
+                <button
                   @click="toggleRole(member)"
                   class="role-btn"
                   :title="member.role === 'admin' ? 'Понизить' : 'Назначить админом'"
                 >
                   {{ member.role === 'admin' ? '⬇' : '⬆' }}
                 </button>
-                <button 
+                <button
                   @click="removeMemberFromGroup(member)"
                   class="remove-btn"
                   title="Удалить"
@@ -445,9 +447,13 @@ import { computed, ref, shallowRef, onMounted, onUnmounted, nextTick, watch } fr
 import { useRoute, useRouter } from 'vue-router'
 import { chatsAPI, messagesAPI, authAPI } from '../services/api'
 import { ChatWebSocket } from '../services/websocket'
+import { formatTime, setUserTimezone } from '../services/datetime'
+import UserAvatar from '../components/UserAvatar.vue'
+import UserName from '../components/UserName.vue'
 
 export default {
   name: 'Chat',
+  components: { UserAvatar, UserName },
   setup() {
     const route = useRoute()
     const router = useRouter()
@@ -488,7 +494,7 @@ export default {
     const typingUser = ref(null)
     let typingTimeout = null
     let pollInterval = null
-    
+
     // Call state
     const inCall = ref(false)
     const callStatus = ref('') // 'calling', 'ringing', 'connected', 'ended'
@@ -543,11 +549,11 @@ export default {
         chatName.value = getChatName(chat)
         isGroupChat.value = chat.chat_type === 'group'
         isBotChat.value = chat.chat_type === 'bot'
-        
+
         if (isBotChat.value && chat.bot) {
           currentBot.value = chat.bot
         }
-        
+
         if (isGroupChat.value) {
           const myMember = chat.members?.find(m => m.user_id === currentUserId.value)
           isAdmin.value = myMember?.role === 'admin'
@@ -606,12 +612,12 @@ export default {
     }
 
     const getSenderStyle = (message) => {
-      const isUltra = message.sender_id === currentUserId.value 
+      const isUltra = message.sender_id === currentUserId.value
         ? (currentUser.value?.is_ultra || false)
         : (message.sender?.is_ultra || false)
-      
+
       if (!isUltra) return {}
-      
+
       // For self - use localStorage. For others - use sender data from server (from DB)
       let color
       if (message.sender_id === currentUserId.value) {
@@ -620,13 +626,13 @@ export default {
         // Get from sender data which comes from server/DB
         color = message.sender?.ultra_profile_color || null
       }
-      
+
       if (!color) return {}
-      
+
       if (color.includes('gradient')) {
-        return { 
-          background: color, 
-          WebkitBackgroundClip: 'text', 
+        return {
+          background: color,
+          WebkitBackgroundClip: 'text',
           WebkitTextFillColor: 'transparent',
           backgroundClip: 'text'
         }
@@ -635,12 +641,12 @@ export default {
     }
 
     const getAvatarClass = (message) => {
-      const isUltra = message.sender_id === currentUserId.value 
+      const isUltra = message.sender_id === currentUserId.value
         ? (currentUser.value?.is_ultra || false)
         : (message.sender?.is_ultra || false)
-      
+
       if (!isUltra) return ''
-      
+
       // For self - use localStorage. For others - use sender data from server (from DB)
       let style
       if (message.sender_id === currentUserId.value) {
@@ -649,17 +655,13 @@ export default {
         // Get from sender data which comes from server/DB
         style = message.sender?.ultra_avatar_style || 'default'
       }
-      
+
       if (style === 'gold') return 'avatar-gold'
       if (style === 'border') return 'avatar-border'
       if (style === 'shine') return 'avatar-shine'
       return ''
     }
 
-    const formatTime = (dateString) => {
-      const date = new Date(dateString)
-      return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-    }
 
     const openMediaModal = (message) => {
       if (message?.media_url) {
@@ -669,7 +671,7 @@ export default {
 
     const scrollToBottom = async (force = false) => {
       if (!force && !shouldAutoScroll.value) return
-      
+
       await nextTick()
       if (messagesContainer.value) {
         const container = messagesContainer.value
@@ -696,7 +698,7 @@ export default {
         })
       }
     }
-    
+
     // Отслеживаем скролл, чтобы определить, нужно ли автоматически прокручивать
     const handleScroll = () => {
       if (!messagesContainer.value) return
@@ -752,9 +754,9 @@ export default {
           id: tempId,
           chat_id: chatId,
           sender_id: currentUserId.value,
-          sender: { 
-            id: currentUserId.value, 
-            email: currentUser.value?.email || '', 
+          sender: {
+            id: currentUserId.value,
+            email: currentUser.value?.email || '',
             full_name: 'Вы',
             is_ultra: currentUser.value?.is_ultra || false,
             ultra_profile_color: localStorage.getItem('ultra_profile_color'),
@@ -772,7 +774,7 @@ export default {
         }
         messages.value.push(tempMessage)
         scrollToBottom()
-        
+
         try {
           console.log('Sending via WebSocket - content:', content, 'mediaData:', mediaData)
           ws.value.sendMessage(content, mediaData)
@@ -809,13 +811,13 @@ export default {
         }
       }
     }
-    
+
     const showAIModal = ref(false)
     const aiEditText = ref('')
     const aiEditPrompt = ref('')
     const aiMode = ref('edit')
     const aiResult = ref('')
-    
+
     const sendToAI = async () => {
       // Always show edit mode first
       showAIModal.value = true
@@ -823,21 +825,21 @@ export default {
       aiEditText.value = newMessage.value.trim()
       aiEditPrompt.value = ''
     }
-    
+
     const applyAIEdit = async () => {
       const prompt = aiEditPrompt.value
       const text = aiEditText.value
-      
+
       if (!prompt.trim() || !text.trim()) {
         alert('Заполни оба поля!')
         return
       }
-      
+
       const fullPrompt = prompt + ': ' + text
-      
+
       try {
         const token = localStorage.getItem('access_token')
-        
+
         const response = await fetch('/api/v1/messages/ai/chat', {
           method: 'POST',
           headers: {
@@ -846,23 +848,23 @@ export default {
           },
           body: JSON.stringify({ message: fullPrompt })
         })
-        
+
         if (!response.ok) {
           alert('Ошибка: ' + response.status)
           return
         }
-        
+
         const res = await response.json()
-        
+
         if (res.response) {
           aiResult.value = res.response
         }
-        
+
       } catch (e) {
         alert('Ошибка: ' + e.message)
       }
     }
-    
+
     const applyAIResult = () => {
       if (aiResult.value) {
         newMessage.value = aiResult.value
@@ -872,11 +874,11 @@ export default {
         aiResult.value = ''
       }
     }
-    
+
     const sendAIChat = async () => {
       const text = newMessage.value.trim()
       if (!text) return
-      
+
       // Show user message in chat temporarily
       const tempId = `temp-${Date.now()}`
       messages.value.push({
@@ -890,7 +892,7 @@ export default {
       })
       newMessage.value = ''
       scrollToBottom()
-      
+
       try {
         const res = await messagesAPI.chatWithAI(text)
         // Add AI response
@@ -1116,7 +1118,7 @@ export default {
         token,
         (data) => {
           console.log('WebSocket message:', data)
-          
+
           if (data.type === 'new_message') {
             const message = data.message
             nextTick(() => {
@@ -1321,7 +1323,7 @@ export default {
       try {
         callMode.value = mode === 'video' ? 'video' : 'audio'
         await createLocalStream(callMode.value === 'video')
-        
+
         peerConnection.value = createPeerConnection(targetUserId)
 
         localStream.value.getTracks().forEach(track => {
@@ -1378,7 +1380,7 @@ export default {
         callStatus.value = 'connecting'
         remoteUser.value = { id: data.from_user_id, name: data.from_user_name }
         await createLocalStream(callMode.value === 'video')
-        
+
         peerConnection.value = createPeerConnection(data.from_user_id)
 
         localStream.value.getTracks().forEach(track => {
@@ -1434,9 +1436,9 @@ export default {
           inCall.value = true
           callStatus.value = 'connecting'
           await createLocalStream(callMode.value === 'video')
-          
+
           peerConnection.value = createPeerConnection(data.from_user_id)
-          
+
           localStream.value.getTracks().forEach(track => {
             peerConnection.value.addTrack(track, localStream.value)
           })
@@ -1486,7 +1488,7 @@ export default {
         peerConnection.value.close()
         peerConnection.value = null
       }
-      
+
       const targetId = remoteUser.value?.id || getOtherUserId()
       if (notifyRemote && targetId && ws.value?.ws) {
         ws.value.ws.send(JSON.stringify({
@@ -1569,7 +1571,7 @@ export default {
 
     const deleteMessage = async (message) => {
       if (!confirm('Удалить сообщение?')) return
-      
+
       try {
         await messagesAPI.deleteMessage(message.id)
         messages.value = messages.value.filter(m => m.id !== message.id)
@@ -1591,7 +1593,7 @@ export default {
       try {
         const memberIds = membersToAdd.value.map(m => m.id)
         await chatsAPI.addMembersToGroup(chatId, memberIds)
-        
+
         // Сброс формы и обновление чата
         showAddMembers.value = false
         memberSearchQuery.value = ''
@@ -1656,7 +1658,7 @@ export default {
         console.log('err.response:', err.response)
         console.log('err.response.status:', err.response?.status)
         console.log('err.response.data:', err.response?.data)
-        
+
         let msg = 'Ошибка'
         if (err && typeof err === 'object') {
           if (err.response && err.response.data) {
@@ -1687,10 +1689,13 @@ export default {
         const user = await authAPI.getCurrentUser()
         currentUserId.value = user.id
         currentUser.value = user  // Сохраняем полные данные пользователя
+        if (user.timezone) {
+          setUserTimezone(user.timezone)
+        }
         await loadChat()
         await loadMessages()
         setupWebSocket()
-        
+
         // Polling for new messages (fallback if WebSocket fails)
         pollInterval = setInterval(async () => {
           if (!ws.value || !ws.value.ws || ws.value.ws.readyState !== WebSocket.OPEN) {
@@ -1706,7 +1711,7 @@ export default {
             } catch (e) {}
           }
         }, 3000)
-        
+
         // Дополнительная прокрутка после полной загрузки компонента
         await nextTick()
         setTimeout(() => {
@@ -1748,7 +1753,7 @@ export default {
         scrollToBottom(true)
       }, 500)
     })
-    
+
     // Отслеживаем изменения в messages для автоматической прокрутки
     watch(messages, () => {
       if (shouldAutoScroll.value) {
@@ -1883,7 +1888,7 @@ deleteMessage,
 
 .back-btn {
   padding: 0.5rem 1rem;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   cursor: pointer;
@@ -2265,7 +2270,7 @@ deleteMessage,
 
 .call-btn {
   padding: 0.5rem;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   cursor: pointer;
@@ -2285,7 +2290,7 @@ deleteMessage,
   border: 1px solid var(--border-color);
   border-radius: 8px;
   font-size: 1rem;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   color: var(--text-primary);
   transition: all 0.3s ease;
 }
@@ -2298,7 +2303,7 @@ deleteMessage,
   outline: none;
   border-color: var(--primary-purple);
   box-shadow: 0 0 0 3px rgba(147, 51, 234, 0.1);
-  background: rgba(10, 10, 10, 0.7);
+  background: var(--bg-sunken);
 }
 
 .input-container button {
@@ -2496,7 +2501,7 @@ deleteMessage,
   border-radius: 8px;
   font-size: 1rem;
   box-sizing: border-box;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   color: var(--text-primary);
   transition: all 0.3s ease;
 }
@@ -2513,7 +2518,7 @@ deleteMessage,
   overflow-y: auto;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
 }
 
 .member-item {
@@ -2679,7 +2684,7 @@ deleteMessage,
   justify-content: center;
   width: 44px;
   height: 44px;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   cursor: pointer;
@@ -2700,7 +2705,7 @@ deleteMessage,
   justify-content: center;
   width: 44px;
   height: 44px;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   color: var(--text-secondary);
@@ -2742,8 +2747,8 @@ deleteMessage,
   width: 52px;
   height: 40px;
   padding: 0.2rem;
-  background: #ffffff;
-  border: 1px solid rgba(124, 58, 237, 0.18);
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
   cursor: pointer;
   box-shadow: 0 10px 22px rgba(124, 58, 237, 0.08);
@@ -2882,7 +2887,7 @@ deleteMessage,
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   color: var(--text-primary);
@@ -2907,7 +2912,7 @@ deleteMessage,
 
 .members-btn {
   padding: 0.5rem 1rem;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   cursor: pointer;
@@ -3046,7 +3051,7 @@ deleteMessage,
 
 .settings-btn {
   padding: 0.5rem;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-input);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   cursor: pointer;
@@ -3276,7 +3281,7 @@ deleteMessage,
   --chat-message-text: var(--text-primary);
   --chat-sender-color: var(--primary-purple-dark);
   --chat-own-sender-color: var(--success);
-  --chat-meta-color: var(--text-muted);
+  --chat-meta-color: var(--text-secondary);
   --chat-input-bg: var(--bg-input);
   --chat-panel-bg: color-mix(in srgb, var(--bg-card) 90%, transparent);
   --chat-soft-control-bg: var(--bg-card);
@@ -3520,9 +3525,9 @@ deleteMessage,
 .input-container .ai-btn:hover,
 .input-container .send-btn:hover:not(:disabled) {
   transform: none;
-  background: #f2ebff;
+  background: var(--chat-action-hover-bg);
   color: var(--primary-purple-dark);
-  box-shadow: 0 1px 4px rgba(49, 28, 86, 0.18);
+  box-shadow: var(--chat-bubble-shadow);
 }
 
 .input-container .send-btn:hover:not(:disabled) {
@@ -3636,21 +3641,21 @@ deleteMessage,
 .document-link {
   border: none;
   border-radius: 14px;
-  background: #f3ecff;
-  color: #342257;
+  background: var(--chat-soft-control-bg);
+  color: var(--chat-message-text);
 }
 
 .own-message .document-link {
-  background: rgba(255, 255, 255, 0.45);
-  color: #342257;
+  background: var(--bg-sunken);
+  color: var(--chat-message-text);
 }
 
 .modal-content {
   border-radius: 14px;
-  background: #ffffff;
-  color: #10202e;
-  border: 1px solid #e2d6fb;
-  box-shadow: 0 20px 70px rgba(71, 38, 129, 0.18);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.28);
 }
 
 .drawing-modal {
@@ -3658,8 +3663,7 @@ deleteMessage,
 }
 
 .drawing-toolbar {
-  background:
-    linear-gradient(180deg, rgba(246, 241, 255, 0.95), rgba(255, 255, 255, 0.96));
+  background: var(--bg-sunken);
   border-top-left-radius: 14px;
   border-top-right-radius: 14px;
 }

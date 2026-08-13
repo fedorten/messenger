@@ -10,12 +10,10 @@
     <div v-else class="posts-list">
       <div v-for="post in posts" :key="post.id" class="post-card" @click="openPost(post.id)">
         <div class="post-author">
-          <div class="author-avatar">
-            {{ getInitials(post.author) }}
-          </div>
+          <UserAvatar :user="post.author" :size="40" />
           <div class="author-info">
-            <span class="author-name">{{ post.author?.full_name || 'Пользователь' }}</span>
-            <span class="post-date">{{ formatDate(post.created_at) }}</span>
+            <UserName :user="post.author" class="author-name" />
+            <span class="post-date">{{ formatDateTime(post.created_at) }}</span>
           </div>
         </div>
         <h2 class="post-title">{{ post.title }}</h2>
@@ -29,7 +27,7 @@
           <span>💬 {{ post.comments_count }}</span>
         </div>
       </div>
-      
+
       <div v-if="posts.length === 0" class="empty-state">
         Постов пока нет. Будь первым!
       </div>
@@ -76,9 +74,13 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { forumAPI } from '../services/api'
+import { formatDateTime } from '../services/datetime'
+import UserAvatar from '../components/UserAvatar.vue'
+import UserName from '../components/UserName.vue'
 
 export default {
   name: 'Forum',
+  components: { UserAvatar, UserName },
   setup() {
     const router = useRouter()
     const posts = ref([])
@@ -123,16 +125,6 @@ export default {
       router.push('/')
     }
 
-    const getInitials = (user) => {
-      if (!user?.full_name) return '?'
-      return user.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-    }
-
-    const formatDate = (dateStr) => {
-      const date = new Date(dateStr)
-      return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
-    }
-
     const truncate = (text, length) => {
       if (!text) return ''
       return text.length > length ? text.slice(0, length) + '...' : text
@@ -148,8 +140,7 @@ export default {
       createPost,
       openPost,
       goBack,
-      getInitials,
-      formatDate,
+      formatDateTime,
       truncate,
     }
   },
@@ -182,7 +173,7 @@ export default {
 
 .back-btn, .create-btn {
   padding: 0.5rem 1rem;
-  background: rgba(10, 10, 10, 0.5);
+  background: var(--bg-sunken);
   border: 1px solid var(--border-color, #333);
   border-radius: 8px;
   color: var(--text-primary, #eee);
@@ -223,18 +214,6 @@ export default {
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 1rem;
-}
-
-.author-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--primary-purple, #9333ea), var(--primary-purple-light, #a855f7));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 0.9rem;
 }
 
 .author-info {
